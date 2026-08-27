@@ -146,7 +146,7 @@ test('passwords are salted, stretched and compared without leaking', async () =>
   const stored = await hashPassword('a-long-enough-password');
   const [scheme, iterations] = stored.split('$');
   assert.equal(scheme, 'pbkdf2');
-  assert.ok(Number(iterations) >= 100000, 'weak stretching is not stretching');
+  assert.ok(Number(iterations) >= 20000, 'weak stretching is not stretching');
   assert.ok(!stored.includes('a-long-enough-password'));
 
   assert.equal(await verifyPassword('a-long-enough-password', stored), true);
@@ -156,4 +156,34 @@ test('passwords are salted, stretched and compared without leaking', async () =>
 
   const again = await hashPassword('a-long-enough-password');
   assert.notEqual(again, stored, 'the same password hashes differently every time');
+});
+
+test('hashing a password fits inside a free Worker CPU budget', async () => {
+  // The bug this guards: 210,000 rounds cost ~30ms of CPU, and a Worker on the
+  // free plan is killed at 10ms — so nobody could sign in, while every test
+  // passed, because neither Node nor `wrangler dev` enforces a CPU limit.
+  await hashPassword('warm the key import and the JIT');
+
+  const time = async (fn) => {
+    const started = process.hrtime.bigint();
+    await fn();
+    return Number(process.hrtime.bigint() - started) / 1e6;
+  };
+
+  const stored = await hashPassword('a-long-enough-password');
+  const hashMs = await time(() => hashPassword('a-long-enough-password'));
+  const verifyMs = await time(() => verifyPassword('a-long-enough-password', stored));
+
+  // Half the budget, so the rest of the request has somewhere to live. This
+  // machine is not a Cloudflare edge node, so it is a smoke alarm rather than a
+  // measurement — it catches an iteration count raised by an order of magnitude.
+  assert.ok(hashMs < 5, `hashing took ${hashMs.toFixed(1)}ms; the free CPU budget is 10ms for the whole request`);
+  assert.ok(verifyMs < 5, `verifying took ${verifyMs.toFixed(1)}ms; the free CPU budget is 10ms for the whole request`);
+});
+
+test('an account survives the iteration count being changed under it', async () => {
+  const old = await hashPassword('a-long-enough-password', 210000);
+  assert.equal(old.split('$')[1], '210000', 'the count is stored with the hash');
+  assert.equal(await verifyPassword('a-long-enough-password', old), true);
+  assert.equal(await verifyPassword('wrong', old), false);
 });

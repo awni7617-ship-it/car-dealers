@@ -123,7 +123,23 @@ async function handleApi(request, env, url) {
         return json({ error: err.message, ...(err.extra || {}) }, err.status);
       }
       console.error('API error', method, path, err && err.stack);
-      return json({ error: 'Something went wrong at our end. Try again.' }, 500);
+      // "Something went wrong" told nobody anything when this hit production.
+      // The shape of the failure is not a secret and it is what makes it
+      // fixable, so the message names it — without leaking a stack trace.
+      const detail = String((err && err.message) || '');
+      if (/exceeded|cpu|resource limits/i.test(detail)) {
+        return json({
+          error: 'The server ran out of its CPU budget on that request. If this is a free Cloudflare plan, '
+            + 'lower PBKDF2_ITERATIONS or upgrade the Worker.',
+        }, 503);
+      }
+      if (/no such table|not a database/i.test(detail)) {
+        return json({ error: 'The database is not set up yet. Reload and try again.' }, 503);
+      }
+      if (/D1_|database/i.test(detail)) {
+        return json({ error: `The database refused that: ${detail.slice(0, 200)}` }, 500);
+      }
+      return json({ error: `Something went wrong at our end: ${detail.slice(0, 200) || 'unknown error'}` }, 500);
     }
   }
 

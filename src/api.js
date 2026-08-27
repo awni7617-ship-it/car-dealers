@@ -138,7 +138,7 @@ export const ROUTES = [
       name,
       email,
       role: 'owner',
-      password: await hashPassword(body.password),
+      password: await hashPassword(body.password, env.PBKDF2_ITERATIONS),
       created_at: nowIso(),
       last_seen_at: nowIso(),
     };
@@ -171,7 +171,7 @@ export const ROUTES = [
       name,
       email,
       role: 'member',
-      password: await hashPassword(body.password),
+      password: await hashPassword(body.password, env.PBKDF2_ITERATIONS),
       created_at: nowIso(),
       last_seen_at: nowIso(),
     };
@@ -239,7 +239,8 @@ export const ROUTES = [
   ['POST', /^\/me\/password$/, async ({ env, user, body }) => {
     if (String(body.newPassword || '').length < 8) fail(400, 'Use a password of at least 8 characters');
     if (!(await verifyPassword(body.currentPassword || '', user.password))) fail(401, 'Current password is wrong');
-    await run(env, 'UPDATE users SET password = ? WHERE id = ?', await hashPassword(body.newPassword), user.id);
+    await run(env, 'UPDATE users SET password = ? WHERE id = ?',
+      await hashPassword(body.newPassword, env.PBKDF2_ITERATIONS), user.id);
     // Changing a password signs every other device out; this one stays in.
     await run(env, 'DELETE FROM sessions WHERE user_id = ? AND id != ?', user.id, user.session_id);
     return { ok: true };
