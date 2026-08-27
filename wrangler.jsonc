@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "forecourt",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-08-01",
+
+  // The front end is static: Cloudflare serves it from the edge and the Worker
+  // never sees those requests. Unmatched paths fall through to the Worker,
+  // which hands back the app shell — so deep links work without a build step.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  // `database_id` is a placeholder so `wrangler dev` works out of the box on a
+  // local SQLite file. `npm run provision` (and the GitHub deploy) replaces it
+  // with the real database before anything is deployed.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "forecourt",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Sign-in and sign-up throttling. Optional: with no namespace bound the
+  // limiter simply does nothing and the app still runs.
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+
+  // Nightly sweep of expired sessions and stale plate lookups.
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

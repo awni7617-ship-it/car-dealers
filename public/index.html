@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0f17" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<meta name="description" content="Forecourt — dealership stock, enquiries and diary, from the number plate up.">
+<title>Forecourt</title>
+<link rel="icon" href="/favicon.svg">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="boot" class="boot">
+  <div class="boot-plate">FORECOURT</div>
+  <div class="boot-bar"><span></span></div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Sign in / sign up                                                    -->
+<!-- ------------------------------------------------------------------ -->
+<div id="auth" class="auth" hidden>
+  <div class="auth-pitch">
+    <div class="brand brand-lg">
+      <span class="brand-mark">FC</span>
+      <span class="brand-name">Forecourt</span>
+    </div>
+    <h1>Every car on your pitch,<br />in one place.</h1>
+    <p class="auth-lede">Type a number plate. The car identifies itself. From then on Forecourt keeps
+      the score — who viewed it, who called, who is collecting it and what it is worth today.</p>
+    <ul class="auth-points">
+      <li><b>Plate to profile in seconds</b><span>Make, age, region, fuel and MOT filled in for you.</span></li>
+      <li><b>Every enquiry counted</b><span>One tap for a viewing, a call, an offer or a test drive.</span></li>
+      <li><b>Collections in the diary</b><span>Know who is coming in, when, and against which car.</span></li>
+      <li><b>A price you can defend</b><span>Guide values, margin per car and stuck-stock warnings.</span></li>
+    </ul>
+    <div class="auth-plate-demo">
+      <span class="plate plate-xl"><i>GB</i>FC24 CAR</span>
+    </div>
+  </div>
+
+  <div class="auth-panel">
+    <div class="auth-card">
+      <div class="seg" role="tablist" id="auth-tabs">
+        <button class="seg-btn is-active" data-mode="login" role="tab">Sign in</button>
+        <button class="seg-btn" data-mode="signup" role="tab">New dealership</button>
+        <button class="seg-btn" data-mode="join" role="tab">Join team</button>
+      </div>
+
+      <form id="auth-form" class="stack" autocomplete="on" novalidate>
+        <div class="field" data-only="signup">
+          <label for="f-dealership">Dealership name</label>
+          <input id="f-dealership" name="dealership" type="text" placeholder="Hillside Motors" autocomplete="organization" />
+        </div>
+        <div class="field" data-only="join">
+          <label for="f-code">Team code</label>
+          <input id="f-code" name="joinCode" type="text" placeholder="ABCD-1234" autocapitalize="characters" spellcheck="false" />
+          <p class="hint">Ask whoever set up your dealership account for this.</p>
+        </div>
+        <div class="field" data-only="signup join">
+          <label for="f-name">Your name</label>
+          <input id="f-name" name="name" type="text" placeholder="Sam Whitfield" autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="f-email">Email</label>
+          <input id="f-email" name="email" type="email" placeholder="you@dealership.co.uk" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="f-password">Password</label>
+          <input id="f-password" name="password" type="password" placeholder="At least 8 characters" autocomplete="current-password" required />
+        </div>
+        <div class="field" data-only="signup">
+          <label for="f-country">Where do you trade?</label>
+          <select id="f-country" name="country">
+            <option value="GB">United Kingdom (£, miles)</option>
+            <option value="IE">Ireland (€, km)</option>
+            <option value="US">United States ($, miles)</option>
+            <option value="AU">Australia (A$, km)</option>
+            <option value="NZ">New Zealand (NZ$, km)</option>
+            <option value="CA">Canada (C$, km)</option>
+            <option value="ZA">South Africa (R, km)</option>
+            <option value="AE">UAE (AED, km)</option>
+            <option value="EU">Elsewhere in Europe (€, km)</option>
+          </select>
+        </div>
+
+        <p class="form-error" id="auth-error" hidden></p>
+        <button class="btn btn-primary btn-lg" type="submit" id="auth-submit">Sign in</button>
+      </form>
+    </div>
+    <p class="auth-foot">Runs on Cloudflare. Your stock data stays in your own database.</p>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- The app                                                              -->
+<!-- ------------------------------------------------------------------ -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">FC</span>
+      <span class="brand-name">Forecourt</span>
+    </div>
+    <nav class="nav" id="nav">
+      <a href="#/dashboard" data-nav="dashboard"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Today</a>
+      <a href="#/stock" data-nav="stock"><svg viewBox="0 0 24 24"><path d="M3 13l2-5a3 3 0 013-2h8a3 3 0 013 2l2 5"/><path d="M3 13h18v5H3z"/><circle cx="7.5" cy="18.5" r="1.5"/><circle cx="16.5" cy="18.5" r="1.5"/></svg>Stock</a>
+      <a href="#/diary" data-nav="diary"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Diary</a>
+      <a href="#/enquiries" data-nav="enquiries"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H8l-5 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Enquiries</a>
+      <a href="#/reports" data-nav="reports"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Reports</a>
+      <a href="#/team" data-nav="team"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0112 0"/><path d="M16 6a3 3 0 010 6M18 20a6 6 0 00-2-4.5"/></svg>Team</a>
+      <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 00-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 00-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 005 12a7 7 0 00.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 002 1.2l.4 2.7h4l.4-2.7a7 7 0 002-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></svg>Settings</a>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" title="Switch theme">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+        <span>Theme</span>
+      </button>
+      <div class="who" id="who"></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="mobile-title-btn" type="button" aria-label="Menu">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="global-search" type="search" placeholder="Search plate, make, model, stock no…" autocomplete="off" spellcheck="false" />
+      </div>
+      <button class="btn btn-primary" id="add-vehicle-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="hide-sm">Add vehicle</span>
+      </button>
+    </header>
+
+    <main id="view" class="view" tabindex="-1"></main>
+
+    <nav class="tabbar only-mobile" id="tabbar">
+      <a href="#/dashboard" data-nav="dashboard"><svg viewBox="0 0 24 24"><path d="M3 12l9-8 9 8"/><path d="M5 10v10h14V10"/></svg><span>Today</span></a>
+      <a href="#/stock" data-nav="stock"><svg viewBox="0 0 24 24"><path d="M3 13l2-5a3 3 0 013-2h8a3 3 0 013 2l2 5"/><path d="M3 13h18v5H3z"/></svg><span>Stock</span></a>
+      <a href="#/diary" data-nav="diary"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Diary</span></a>
+      <a href="#/enquiries" data-nav="enquiries"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H8l-5 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span>Enquiries</span></a>
+      <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M4 12h2M18 12h2M12 4v2M12 18v2"/></svg><span>More</span></a>
+    </nav>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

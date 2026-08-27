@@ -1,0 +1,10 @@
+{
+  "name": "Forecourt",
+  "short_name": "Forecourt",
+  "description": "Dealership stock, enquiries and diary — from the number plate up.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f17",
+  "theme_color": "#0b0f17",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

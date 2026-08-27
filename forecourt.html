@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0f17" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<meta name="description" content="Forecourt — dealership stock, enquiries and diary, from the number plate up.">
 <title>Forecourt</title>
-</head>
-<body>
 <style>
 /* ==================================================================
    Forecourt — design system
@@ -634,8 +635,9 @@ select {
   .view { padding: 0; }
   .card { break-inside: avoid; box-shadow: none; }
 }
-
 </style>
+</head>
+<body>
 <div id="boot" class="boot">
   <div class="boot-plate">FORECOURT</div>
   <div class="boot-bar"><span></span></div>
@@ -1087,8 +1089,6 @@ function stockAdvice(v, stats) {
 }
 
 
-
-
 /* ---- plate decoding ---- */
 
 /**
@@ -1230,408 +1230,19 @@ function decodePlate(plate) {
   return out;
 }
 
-const FUEL_MAP = {
-  PETROL: 'Petrol', DIESEL: 'Diesel', ELECTRICITY: 'Electric', ELECTRIC: 'Electric',
-  'HYBRID ELECTRIC': 'Hybrid', 'HYBRID ELECTRIC (CLEAN)': 'Hybrid', GAS: 'LPG',
-  'GAS BI-FUEL': 'Bi-fuel', 'GAS DIESEL': 'Bi-fuel',
-};
 
-function titleCase(value) {
-  if (!value) return null;
-  return String(value)
-    .toLowerCase()
-    .replace(/\b([a-z])/g, (c) => c.toUpperCase())
-    .replace(/\bBmw\b/, 'BMW')
-    .replace(/\bMg\b/, 'MG')
-    .replace(/\bDs\b/, 'DS')
-    .replace(/\bGmc\b/, 'GMC');
-}
-
-/** DVLA Vehicle Enquiry Service — needs a free API key in DVLA_API_KEY. */
-async function fetchDvla(key, apiKey) {
-  const res = await fetch('https://driver-vehicle-licensing.api.gov.uk/vehicle-enquiry/v1/vehicles', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
-    body: JSON.stringify({ registrationNumber: key }),
-  });
-  if (!res.ok) {
-    if (res.status === 404) return { notFound: true };
-    throw new Error(`DVLA responded ${res.status}`);
-  }
-  const d = await res.json();
-  const firstReg = d.monthOfFirstRegistration ? `${d.monthOfFirstRegistration}-01` : null;
-  return {
-    data: {
-      make: titleCase(d.make),
-      colour: titleCase(d.colour),
-      fuel: FUEL_MAP[String(d.fuelType || '').toUpperCase()] || titleCase(d.fuelType),
-      year: d.yearOfManufacture || null,
-      engineCc: d.engineCapacity || null,
-      co2: d.co2Emissions ?? null,
-      motExpiry: d.motExpiryDate || null,
-      motStatus: d.motStatus || null,
-      taxStatus: d.taxStatus || null,
-      taxDue: d.taxDueDate || null,
-      firstRegistered: firstReg,
-      wheelplan: titleCase(d.wheelplan),
-      typeApproval: d.typeApproval || null,
-      exported: d.markedForExport || false,
-    },
-    source: 'DVLA',
-  };
-}
+/* ---- shared rules ---- */
 
 /**
- * DVSA MOT History API. Needs MOT_CLIENT_ID / MOT_CLIENT_SECRET / MOT_API_KEY.
- * Worth having: it holds the model — which DVLA does not — and every odometer
- * reading ever recorded at an MOT, so mileage can be checked against history.
- */
-const MOT_TENANT = 'a455b827-244f-4c97-b5b4-ce5d13b4d00c';
-let motToken = null;
-
-async function motAccessToken(env) {
-  if (motToken && motToken.expires > Date.now() + 60_000) return motToken.value;
-  const tenant = env.MOT_TENANT_ID || MOT_TENANT;
-  const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: env.MOT_CLIENT_ID,
-      client_secret: env.MOT_CLIENT_SECRET,
-      scope: 'https://tapi.dvsa.gov.uk/.default',
-    }),
-  });
-  if (!res.ok) throw new Error(`MOT sign-in failed (${res.status})`);
-  const json = await res.json();
-  motToken = { value: json.access_token, expires: Date.now() + (json.expires_in || 3600) * 1000 };
-  return motToken.value;
-}
-
-async function fetchMot(key, env) {
-  const token = await motAccessToken(env);
-  const res = await fetch(
-    `https://history.mot.api.gov.uk/v1/trade/vehicles/registration/${encodeURIComponent(key)}`,
-    { headers: { authorization: `Bearer ${token}`, 'x-api-key': env.MOT_API_KEY, accept: 'application/json+v6' } },
-  );
-  if (res.status === 404) return { notFound: true };
-  if (!res.ok) throw new Error(`MOT history responded ${res.status}`);
-  const v = await res.json();
-
-  const tests = (v.motTests || [])
-    .map((t) => ({
-      date: t.completedDate || '',
-      result: t.testResult || '',
-      expiry: t.expiryDate || '',
-      odometer: Number(t.odometerValue) || null,
-      unit: (t.odometerUnit || 'mi').toLowerCase().startsWith('k') ? 'km' : 'mi',
-      advisories: (t.defects || []).filter((d) => /advisory|minor/i.test(d.type || '')).length,
-      failures: (t.defects || []).filter((d) => /fail|major|dangerous/i.test(d.type || '')).length,
-    }))
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
-
-  const withReading = tests.filter((t) => t.odometer);
-  const latest = withReading[0] || null;
-  // A reading lower than an older one is the clocking check a dealer wants.
-  let discrepancy = null;
-  for (let i = 0; i < withReading.length - 1; i++) {
-    if (withReading[i].odometer < withReading[i + 1].odometer) {
-      discrepancy = `Recorded mileage drops from ${withReading[i + 1].odometer.toLocaleString()} (${withReading[i + 1].date.slice(0, 10)}) to ${withReading[i].odometer.toLocaleString()} (${withReading[i].date.slice(0, 10)})`;
-      break;
-    }
-  }
-
-  return {
-    data: {
-      make: titleCase(v.make),
-      model: titleCase(v.model),
-      fuel: FUEL_MAP[String(v.fuelType || '').toUpperCase()] || titleCase(v.fuelType),
-      colour: titleCase(v.primaryColour),
-      engineCc: Number(v.engineSize) || null,
-      firstRegistered: (v.firstUsedDate || v.registrationDate || '').slice(0, 10) || null,
-      motExpiry: tests[0] ? tests[0].expiry : null,
-      mileage: latest ? latest.odometer : null,
-    },
-    history: {
-      lastReading: latest,
-      readings: withReading.slice(0, 6).map(({ date, odometer, unit }) => ({ date: date.slice(0, 10), odometer, unit })),
-      tests: tests.length,
-      passRate: tests.length
-        ? Math.round((tests.filter((t) => /pass/i.test(t.result)).length / tests.length) * 100)
-        : null,
-      discrepancy,
-    },
-    source: 'DVSA MOT history',
-  };
-}
-
-/** Any other provider: LOOKUP_URL with {plate}, key sent in LOOKUP_HEADER. */
-async function fetchGeneric(key, env) {
-  const url = env.LOOKUP_URL.replace('{plate}', encodeURIComponent(key));
-  const headers = { accept: 'application/json' };
-  if (env.LOOKUP_KEY) headers[env.LOOKUP_HEADER || 'x-api-key'] = env.LOOKUP_KEY;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`Lookup provider responded ${res.status}`);
-  const raw = await res.json();
-  // Providers nest their payload differently; look one level down too.
-  const d = raw.vehicle || raw.data || raw.Response || raw.result || raw;
-  const pick = (...names) => {
-    for (const n of names) {
-      for (const candidate of [n, n.toLowerCase(), n.toUpperCase()]) {
-        if (d && d[candidate] !== undefined && d[candidate] !== null && d[candidate] !== '') return d[candidate];
-      }
-    }
-    return null;
-  };
-  return {
-    data: {
-      make: titleCase(pick('make', 'Make', 'manufacturer')),
-      model: titleCase(pick('model', 'Model', 'range')),
-      variant: titleCase(pick('variant', 'trim', 'derivative')),
-      year: Number(pick('year', 'yearOfManufacture', 'manufactureYear')) || null,
-      colour: titleCase(pick('colour', 'color')),
-      fuel: titleCase(pick('fuel', 'fuelType')),
-      transmission: titleCase(pick('transmission', 'transmissionType')),
-      body: titleCase(pick('body', 'bodyStyle', 'bodyType')),
-      engineCc: Number(pick('engineCc', 'engineCapacity', 'engineSize')) || null,
-      doors: Number(pick('doors', 'numberOfDoors')) || null,
-      seats: Number(pick('seats', 'numberOfSeats')) || null,
-      co2: Number(pick('co2', 'co2Emissions')) ?? null,
-      vin: pick('vin', 'VIN', 'chassisNumber'),
-      motExpiry: pick('motExpiry', 'motExpiryDate'),
-      taxDue: pick('taxDue', 'taxDueDate'),
-    },
-    source: env.LOOKUP_NAME || 'Provider',
-  };
-}
-
-/** NHTSA vPIC — free, keyless, worldwide VIN decoding. */
-async function decodeVin(vin) {
-  const clean = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (clean.length !== 17) return null;
-  const res = await fetch(
-    `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${clean}?format=json`,
-    { headers: { accept: 'application/json' } },
-  );
-  if (!res.ok) throw new Error(`VIN service responded ${res.status}`);
-  const json = await res.json();
-  const r = (json.Results && json.Results[0]) || {};
-  if (!r.Make && !r.Model) return null;
-  const trans = r.TransmissionStyle || '';
-  return {
-    vin: clean,
-    make: titleCase(r.Make),
-    model: titleCase(r.Model),
-    variant: titleCase(r.Trim || r.Series || null),
-    year: Number(r.ModelYear) || null,
-    body: titleCase(r.BodyClass),
-    fuel: titleCase(r.FuelTypePrimary),
-    transmission: /manual/i.test(trans) ? 'Manual' : /auto|cvt|dct/i.test(trans) ? 'Automatic' : titleCase(trans) || null,
-    engineCc: r.DisplayCC ? Math.round(Number(r.DisplayCC)) : null,
-    doors: Number(r.Doors) || null,
-    seats: Number(r.Seats) || null,
-    plant: [r.PlantCity, r.PlantCountry].filter(Boolean).join(', ') || null,
-  };
-}
-
-const CACHE_DAYS = 30;
-
-/**
- * Identify a vehicle from its plate (and optionally a VIN).
- * Returns { plate, fields, decoded, source, sources[], cached }.
- */
-async function identify(env, plateInput, vinInput) {
-  const key = plateKey(plateInput);
-  const decoded = decodePlate(key);
-  const fields = {};
-  const sources = [];
-  let cached = false;
-
-  if (decoded.year) fields.year = decoded.year;
-  if (decoded.registeredFrom) fields.firstRegistered = decoded.registeredFrom;
-  if (decoded.region) fields.region = decoded.issuedAt ? `${decoded.region} (${decoded.issuedAt})` : decoded.region;
-  if (decoded.scheme.startsWith('uk')) sources.push('Plate decoder');
-
-  // A cached hit avoids paying for the same plate twice.
-  let live = null;
-  if (key) {
-    try {
-      const row = await env.DB.prepare(
-        'SELECT payload, fetched_at FROM plate_cache WHERE plate_key = ?',
-      ).bind(key).first();
-      if (row && (Date.now() - Date.parse(row.fetched_at)) / 86400000 < CACHE_DAYS) {
-        live = JSON.parse(row.payload);
-        cached = true;
-      }
-    } catch { /* cache is best-effort */ }
-  }
-
-  if (!live && key) {
-    live = { fields: {}, history: null, sources: [] };
-
-    // 1. The registration provider: DVLA, or whatever LOOKUP_URL points at.
-    try {
-      const provider = env.LOOKUP_URL
-        ? await fetchGeneric(key, env)
-        : env.DVLA_API_KEY
-          ? await fetchDvla(key, env.DVLA_API_KEY)
-          : null;
-      if (provider && provider.data) {
-        Object.assign(live.fields, clean(provider.data));
-        live.sources.push(provider.source);
-      } else if (provider && provider.notFound) {
-        live.sources.push('Not held by DVLA');
-      }
-    } catch (err) {
-      live.sources.push(`Lookup unavailable (${err.message})`);
-    }
-
-    // 2. MOT history fills what DVLA cannot: the model, and real mileage.
-    if (env.MOT_CLIENT_ID && env.MOT_CLIENT_SECRET && env.MOT_API_KEY) {
-      try {
-        const mot = await fetchMot(key, env);
-        if (mot && mot.data) {
-          for (const [k, v] of Object.entries(clean(mot.data))) {
-            if (live.fields[k] === undefined || live.fields[k] === null || live.fields[k] === '') {
-              live.fields[k] = v;
-            }
-          }
-          live.history = mot.history;
-          live.sources.push(mot.source);
-        } else if (mot && mot.notFound) {
-          live.sources.push('No MOT history');
-        }
-      } catch (err) {
-        live.sources.push(`MOT history unavailable (${err.message})`);
-      }
-    }
-
-    if (live.sources.length) {
-      try {
-        await env.DB.prepare(
-          `INSERT INTO plate_cache (plate_key, payload, source, fetched_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(plate_key) DO UPDATE SET payload = excluded.payload, source = excluded.source, fetched_at = excluded.fetched_at`,
-        ).bind(key, JSON.stringify(live), live.sources[0], new Date().toISOString()).run();
-      } catch { /* cache is best-effort */ }
-    }
-  }
-
-  if (live) {
-    Object.assign(fields, live.fields || {});
-    for (const s of live.sources || []) sources.push(cached ? `${s} (cached)` : s);
-  }
-
-  const vin = vinInput || fields.vin;
-  if (vin) {
-    try {
-      const vinData = await decodeVin(vin);
-      if (vinData) {
-        // VIN fills the gaps — notably model and trim, which DVLA does not hold.
-        for (const [k, v] of Object.entries(clean(vinData))) {
-          if (fields[k] === undefined || fields[k] === null || fields[k] === '') fields[k] = v;
-        }
-        sources.push('NHTSA VIN database');
-      }
-    } catch (err) {
-      sources.push(`VIN decode unavailable (${err.message})`);
-    }
-  }
-
-  return {
-    plate: formatPlate(key),
-    plateKey: key,
-    fields,
-    decoded,
-    history: (live && live.history) || null,
-    sources,
-    cached,
-    identified: Boolean(fields.make || fields.model),
-  };
-}
-
-function clean(obj) {
-  const out = {};
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (v !== null && v !== undefined && v !== '' && !Number.isNaN(v)) out[k] = v;
-  }
-  return out;
-}
-
-
-/* ---- local backend ---- */
-
-/**
- * Local backend for the standalone build.
+ * The rules both backends obey.
  *
- * Answers exactly the same routes as the Worker, with the same JSON shapes, but
- * against localStorage instead of D1 — so the front end is byte-for-byte the
- * same code in both builds. Everything stays on the device that opened the page.
- *
- * Loaded only by `npm run standalone`; the deployed app never sees it.
+ * The Worker writes to D1 and the standalone build writes to localStorage, but
+ * a plate is cleaned, a price parsed and a vehicle's interest counted exactly
+ * once — here — so the two can never drift apart on what the data means.
  */
-
-const STORE_KEY = 'forecourt-store-v1';
-const SESSION_KEY = 'forecourt-session-v1';
 
 const nowIso = () => new Date().toISOString();
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-
-function blank() {
-  return { dealership: null, users: [], vehicles: [], activities: [], appointments: [], valuations: [] };
-}
-
-/**
- * Private browsing, blocked site data or a full quota all make localStorage
- * throw. Rather than dying, fall back to memory for the session and raise a
- * flag so the page can warn that nothing is being kept.
- */
-const memory = new Map();
-let ephemeral = false;
-
-function getItem(key) {
-  if (!ephemeral) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      ephemeral = true;
-      globalThis.FORECOURT_EPHEMERAL = true;
-    }
-  }
-  return memory.has(key) ? memory.get(key) : null;
-}
-
-function setItem(key, value) {
-  if (!ephemeral) {
-    try {
-      localStorage.setItem(key, value);
-      return;
-    } catch {
-      ephemeral = true;
-      globalThis.FORECOURT_EPHEMERAL = true;
-    }
-  }
-  memory.set(key, value);
-}
-
-function removeItem(key) {
-  memory.delete(key);
-  try {
-    localStorage.removeItem(key);
-  } catch { /* nothing to do */ }
-}
-
-function load() {
-  try {
-    const raw = getItem(STORE_KEY);
-    return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
-  } catch {
-    return blank();
-  }
-}
-
-function save(db) {
-  setItem(STORE_KEY, JSON.stringify(db));
-}
 
 class ApiError extends Error {
   constructor(status, message, extra) {
@@ -1640,14 +1251,10 @@ class ApiError extends Error {
     this.extra = extra;
   }
 }
+
 const fail = (status, message, extra) => {
   throw new ApiError(status, message, extra);
 };
-
-async function hash(text) {
-  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`forecourt:${text}`));
-  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 const str = (v, max = 500) => {
   if (v === null || v === undefined) return null;
@@ -1657,7 +1264,11 @@ const str = (v, max = 500) => {
 
 const num = (v) => {
   if (v === null || v === undefined || v === '') return null;
-  const n = Number(String(v).replace(/[^0-9.\-]/g, ''));
+  const cleaned = String(v).replace(/[^0-9.\-]/g, '');
+  // Text with no digits in it ("ask me", "n/a") cleans down to nothing, and
+  // Number('') is 0 — which would quietly price a car at zero.
+  if (!/\d/.test(cleaned)) return null;
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 };
 
@@ -1716,6 +1327,257 @@ function joinCode() {
     .map((b) => alphabet[b % alphabet.length]).join('').replace(/^(.{4})/, '$1-');
 }
 
+/**
+ * What a vehicle's activity adds up to: how many came to look, how many rang,
+ * and who is booked in next. Takes plain arrays so it works the same over a D1
+ * result set as over the standalone store.
+ */
+function counts(activities, appointments) {
+  const acts = activities || [];
+  const appts = (appointments || [])
+    .filter((a) => a.status === 'scheduled')
+    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+  return {
+    viewings: acts.filter((a) => a.kind === 'viewing').length,
+    calls: acts.filter((a) => a.kind === 'call').length,
+    enquiries: acts.filter((a) => ['enquiry', 'offer', 'test_drive', 'message'].includes(a.kind)).length,
+    last_activity_at: acts.length ? acts.map((a) => a.occurred_at).sort().pop() : null,
+    booked: appts.length,
+    next_at: appts[0] ? appts[0].scheduled_at : null,
+    next_customer: appts[0] ? appts[0].customer_name : null,
+    next_kind: appts[0] ? appts[0].kind : null,
+  };
+}
+
+/** A stored vehicle plus everything the front end shows around it. */
+function decorate(vehicle, { activities, appointments, dealership }) {
+  const c = counts(activities, appointments);
+  const stats = {
+    viewings: c.viewings,
+    calls: c.calls,
+    enquiries: c.enquiries,
+    daysInStock: daysBetween(vehicle.date_in || vehicle.created_at),
+  };
+  const estimate = estimateValue(vehicle, {
+    currency: dealership.currency,
+    distanceUnit: dealership.distance_unit,
+  });
+  return {
+    ...vehicle,
+    ...c,
+    stats: { ...stats, interest: stats.viewings + stats.calls + stats.enquiries },
+    estimate,
+    advice: stockAdvice(vehicle, { ...stats, estimate }),
+    margin: vehicle.asking_price ? vehicle.asking_price - (vehicle.purchase_price || 0) - (vehicle.prep_cost || 0) : null,
+    profit: vehicle.sold_price ? vehicle.sold_price - (vehicle.purchase_price || 0) - (vehicle.prep_cost || 0) : null,
+  };
+}
+
+const SORTS = {
+  newest: (a, b) => b.created_at.localeCompare(a.created_at),
+  oldest: (a, b) => a.created_at.localeCompare(b.created_at),
+  price_high: (a, b) => (b.asking_price || 0) - (a.asking_price || 0),
+  price_low: (a, b) => (a.asking_price || 0) - (b.asking_price || 0),
+  interest: (a, b) => b.stats.interest - a.stats.interest,
+  age: (a, b) => (a.date_in || a.created_at).localeCompare(b.date_in || b.created_at),
+  plate: (a, b) => a.plate_key.localeCompare(b.plate_key),
+};
+
+/** The columns a dealer gets when they export their stock list. */
+const CSV_COLUMNS = ['plate', 'stock_number', 'make', 'model', 'variant', 'year', 'colour', 'fuel',
+  'transmission', 'mileage', 'status', 'purchase_price', 'prep_cost', 'asking_price',
+  'sold_price', 'date_in', 'date_sold', 'buyer_name', 'location', 'mot_expiry', 'vin'];
+
+function csvCell(value) {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+
+/* ---- sample stock ---- */
+
+/**
+ * Sample stock.
+ *
+ * A brand-new account is an empty grid, which tells a dealer nothing about what
+ * the app does. This builds a believable week on a small pitch — six cars, the
+ * viewings and calls they attracted, and a collection booked for this
+ * afternoon — so the dashboard, diary and enquiry list all have something to
+ * show. It is offered once, and it is deletable.
+ */
+
+const SAMPLES = [
+  ['LT20XYZ', 'Volkswagen', 'Golf', 'Life TSI 1.5', 2020, 'Grey', 'Petrol', 'Manual', 'Hatchback', 1498, 34210, 13495, 10800, 'in_stock', 96],
+  ['MA68KDR', 'BMW', '320d', 'M Sport Touring', 2018, 'Black', 'Diesel', 'Automatic', 'Estate', 1995, 68400, 15995, 12750, 'in_stock', 41],
+  ['YB21WNP', 'Ford', 'Puma', 'ST-Line X', 2021, 'Blue', 'Petrol', 'Manual', 'SUV', 999, 22980, 15750, 13200, 'reserved', 18],
+  ['SK17FGH', 'Audi', 'A4', 'S Line TDI', 2017, 'White', 'Diesel', 'Automatic', 'Saloon', 1968, 89250, 11450, 8900, 'in_stock', 74],
+  ['LR69TMA', 'Toyota', 'Yaris', 'Icon Hybrid', 2019, 'Red', 'Hybrid', 'Automatic', 'Hatchback', 1490, 41100, 11250, 9100, 'in_stock', 9],
+  ['BD23OLV', 'Tesla', 'Model 3', 'Long Range', 2023, 'White', 'Electric', 'Automatic', 'Saloon', null, 18400, 26950, 23500, 'prep', 4],
+];
+
+const NAMES = ['Dave Harris', 'Priya Shah', 'Tom Nolan', 'Grace Bennett', 'Marcus Reid', 'Ellie Fry'];
+const KINDS = ['viewing', 'call', 'enquiry', 'call', 'viewing', 'test_drive', 'offer'];
+
+const BOOKINGS = [
+  [2, 'collection', 'Priya Shah', '07700 900123', 26, 500, 'Paying balance on collection'],
+  [1, 'viewing', 'Tom Nolan', '07700 900456', 5, null, 'Coming after work'],
+  [0, 'test_drive', 'Grace Bennett', '07700 900789', 51, null, 'Bringing licence'],
+];
+
+const DEMO_SIZE = SAMPLES.length;
+
+/** Rows ready to store, in whichever backend asked for them. */
+function buildDemo(user) {
+  const now = Date.now();
+  const vehicles = [];
+  const activities = [];
+  const appointments = [];
+
+  SAMPLES.forEach((sample, i) => {
+    const [plate, make, model, variant, year, colour, fuel, transmission, body,
+      cc, mileage, asking, purchase, status, days] = sample;
+    const created = new Date(now - days * 86400000).toISOString();
+    const id = uid();
+    vehicles.push({
+      id,
+      plate: formatPlate(plate),
+      plate_key: plateKey(plate),
+      make, model, variant, year, colour, fuel, transmission, body,
+      engine_cc: cc,
+      mileage,
+      condition: 'good',
+      purchase_price: purchase,
+      asking_price: asking,
+      status,
+      date_in: created.slice(0, 10),
+      stock_number: `S${1001 + i}`,
+      location: 'Main forecourt',
+      service_history: 'Full service history',
+      created_by: user.id,
+      created_at: created,
+      updated_at: created,
+    });
+
+    const events = Math.min(9, 2 + ((i * 3) % 8));
+    for (let e = 0; e < events; e++) {
+      const at = new Date(now - Math.max(1, days - e * 2) * 86400000 + e * 3600000).toISOString();
+      const kind = KINDS[(i + e) % KINDS.length];
+      activities.push({
+        id: uid(),
+        vehicle_id: id,
+        kind,
+        contact_name: NAMES[(i + e) % NAMES.length],
+        contact_phone: `07${700 + ((i * 7 + e) % 99)} ${100000 + ((i * 13 + e * 7) % 899999)}`,
+        contact_email: null,
+        amount: kind === 'offer' ? 11800 + i * 250 : null,
+        notes: kind === 'call' ? 'Asked about the service history'
+          : kind === 'offer' ? 'Cash today, no part-ex' : null,
+        occurred_at: at,
+        user_id: user.id,
+        user_name: user.name,
+        created_at: at,
+      });
+    }
+  });
+
+  for (const [index, kind, customer, phone, hours, deposit, notes] of BOOKINGS) {
+    appointments.push({
+      id: uid(),
+      vehicle_id: vehicles[index].id,
+      kind,
+      customer_name: customer,
+      customer_phone: phone,
+      customer_email: null,
+      scheduled_at: new Date(now + hours * 3600000).toISOString(),
+      status: 'scheduled',
+      deposit,
+      notes,
+      created_by: user.id,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    });
+  }
+
+  return { vehicles, activities, appointments };
+}
+
+
+/* ---- local backend ---- */
+
+/**
+ * Local backend for the standalone build.
+ *
+ * Answers exactly the same routes as the Worker, with the same JSON shapes, but
+ * against localStorage instead of D1 — so the front end is byte-for-byte the
+ * same code in both builds. Everything stays on the device that opened the page.
+ *
+ * Loaded only by `npm run standalone`; the deployed app never sees it.
+ */
+
+const STORE_KEY = 'forecourt-store-v1';
+const SESSION_KEY = 'forecourt-session-v1';
+
+function blank() {
+  return { dealership: null, users: [], vehicles: [], activities: [], appointments: [], valuations: [] };
+}
+
+/**
+ * Private browsing, blocked site data or a full quota all make localStorage
+ * throw. Rather than dying, fall back to memory for the session and raise a
+ * flag so the page can warn that nothing is being kept.
+ */
+const memory = new Map();
+let ephemeral = false;
+
+function getItem(key) {
+  if (!ephemeral) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      ephemeral = true;
+      globalThis.FORECOURT_EPHEMERAL = true;
+    }
+  }
+  return memory.has(key) ? memory.get(key) : null;
+}
+
+function setItem(key, value) {
+  if (!ephemeral) {
+    try {
+      localStorage.setItem(key, value);
+      return;
+    } catch {
+      ephemeral = true;
+      globalThis.FORECOURT_EPHEMERAL = true;
+    }
+  }
+  memory.set(key, value);
+}
+
+function removeItem(key) {
+  memory.delete(key);
+  try {
+    localStorage.removeItem(key);
+  } catch { /* nothing to do */ }
+}
+
+function load() {
+  try {
+    const raw = getItem(STORE_KEY);
+    return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
+  } catch {
+    return blank();
+  }
+}
+
+function save(db) {
+  setItem(STORE_KEY, JSON.stringify(db));
+}
+async function hash(text) {
+  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`forecourt:${text}`));
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 function publicUser(db, user) {
   const d = db.dealership;
   return {
@@ -1740,57 +1602,21 @@ function currentUser(db) {
   return id ? db.users.find((u) => u.id === id) || null : null;
 }
 
-function counts(db, vehicleId) {
-  const acts = db.activities.filter((a) => a.vehicle_id === vehicleId);
-  const appts = db.appointments
-    .filter((a) => a.vehicle_id === vehicleId && a.status === 'scheduled')
-    .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-  return {
-    viewings: acts.filter((a) => a.kind === 'viewing').length,
-    calls: acts.filter((a) => a.kind === 'call').length,
-    enquiries: acts.filter((a) => ['enquiry', 'offer', 'test_drive', 'message'].includes(a.kind)).length,
-    last_activity_at: acts.length ? acts.map((a) => a.occurred_at).sort().pop() : null,
-    booked: appts.length,
-    next_at: appts[0] ? appts[0].scheduled_at : null,
-    next_customer: appts[0] ? appts[0].customer_name : null,
-    next_kind: appts[0] ? appts[0].kind : null,
-  };
+/** The shared counters and decoration, over the shape this store keeps. */
+function vehicleCounts(db, vehicleId) {
+  return counts(
+    db.activities.filter((a) => a.vehicle_id === vehicleId),
+    db.appointments.filter((a) => a.vehicle_id === vehicleId),
+  );
 }
 
-function decorate(db, v) {
-  const c = counts(db, v.id);
-  const d = db.dealership;
-  const stats = {
-    viewings: c.viewings,
-    calls: c.calls,
-    enquiries: c.enquiries,
-    daysInStock: daysBetween(v.date_in || v.created_at),
-  };
-  const estimate = estimateValue(v, { currency: d.currency, distanceUnit: d.distance_unit });
-  return {
-    ...v,
-    ...c,
-    stats: { ...stats, interest: stats.viewings + stats.calls + stats.enquiries },
-    estimate,
-    advice: stockAdvice(v, { ...stats, estimate }),
-    margin: v.asking_price ? v.asking_price - (v.purchase_price || 0) - (v.prep_cost || 0) : null,
-    profit: v.sold_price ? v.sold_price - (v.purchase_price || 0) - (v.prep_cost || 0) : null,
-  };
+function withStats(db, v) {
+  return decorate(v, {
+    activities: db.activities.filter((a) => a.vehicle_id === v.id),
+    appointments: db.appointments.filter((a) => a.vehicle_id === v.id),
+    dealership: db.dealership,
+  });
 }
-
-const SORTS = {
-  newest: (a, b) => b.created_at.localeCompare(a.created_at),
-  oldest: (a, b) => a.created_at.localeCompare(b.created_at),
-  price_high: (a, b) => (b.asking_price || 0) - (a.asking_price || 0),
-  price_low: (a, b) => (a.asking_price || 0) - (b.asking_price || 0),
-  interest: (a, b) => b.stats.interest - a.stats.interest,
-  age: (a, b) => (a.date_in || a.created_at).localeCompare(b.date_in || b.created_at),
-  plate: (a, b) => a.plate_key.localeCompare(b.plate_key),
-};
-
-/* ------------------------------------------------------------------ *
- * The routes
- * ------------------------------------------------------------------ */
 
 const LOCAL_ROUTES = [
   ['POST', /^\/auth\/signup$/, async (db, _p, body) => {
@@ -1914,7 +1740,7 @@ const LOCAL_ROUTES = [
   ['GET', /^\/vehicles$/, async (db, _p, _b, _u, query) => {
     const status = query.get('status');
     const q = (query.get('q') || '').trim().toUpperCase();
-    let list = db.vehicles.map((v) => decorate(db, v));
+    let list = db.vehicles.map((v) => withStats(db, v));
     if (status && status !== 'all') {
       list = status === 'live'
         ? list.filter((v) => ['in_stock', 'prep', 'reserved'].includes(v.status))
@@ -1959,14 +1785,14 @@ const LOCAL_ROUTES = [
     };
     db.vehicles.push(vehicle);
     save(db);
-    return { vehicle: decorate(db, vehicle) };
+    return { vehicle: withStats(db, vehicle) };
   }],
 
   ['GET', /^\/vehicles\/([^/]+)$/, async (db, p) => {
     const vehicle = db.vehicles.find((v) => v.id === p[0]);
     if (!vehicle) fail(404, 'Vehicle not found');
     return {
-      vehicle: decorate(db, vehicle),
+      vehicle: withStats(db, vehicle),
       activities: db.activities.filter((a) => a.vehicle_id === vehicle.id)
         .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
       appointments: db.appointments.filter((a) => a.vehicle_id === vehicle.id)
@@ -2009,7 +1835,7 @@ const LOCAL_ROUTES = [
     }
     Object.assign(vehicle, patch, { updated_at: nowIso() });
     save(db);
-    return { vehicle: decorate(db, vehicle) };
+    return { vehicle: withStats(db, vehicle) };
   }],
 
   ['DELETE', /^\/vehicles\/([^/]+)$/, async (db, p) => {
@@ -2039,7 +1865,7 @@ const LOCAL_ROUTES = [
     };
     db.activities.push(activity);
     save(db);
-    return { activity, vehicle: decorate(db, vehicle) };
+    return { activity, vehicle: withStats(db, vehicle) };
   }],
 
   ['DELETE', /^\/activities\/([^/]+)$/, async (db, p) => {
@@ -2076,7 +1902,7 @@ const LOCAL_ROUTES = [
       vehicle.updated_at = nowIso();
     }
     save(db);
-    return { appointment, vehicle: decorate(db, vehicle) };
+    return { appointment, vehicle: withStats(db, vehicle) };
   }],
 
   ['PATCH', /^\/appointments\/([^/]+)$/, async (db, p, body, user) => {
@@ -2108,7 +1934,7 @@ const LOCAL_ROUTES = [
     }
     save(db);
     const vehicle = db.vehicles.find((v) => v.id === appointment.vehicle_id);
-    return { appointment, vehicle: vehicle ? decorate(db, vehicle) : null };
+    return { appointment, vehicle: vehicle ? withStats(db, vehicle) : null };
   }],
 
   ['DELETE', /^\/appointments\/([^/]+)$/, async (db, p) => {
@@ -2290,58 +2116,12 @@ const LOCAL_ROUTES = [
 
   ['POST', /^\/demo$/, async (db, _p, _b, user) => {
     if (db.vehicles.length) fail(400, 'Sample stock can only be added to an empty account');
-    const now = Date.now();
-    const samples = [
-      ['LT20XYZ', 'Volkswagen', 'Golf', 'Life TSI 1.5', 2020, 'Grey', 'Petrol', 'Manual', 'Hatchback', 1498, 34210, 13495, 10800, 'in_stock', 96],
-      ['MA68KDR', 'BMW', '320d', 'M Sport Touring', 2018, 'Black', 'Diesel', 'Automatic', 'Estate', 1995, 68400, 15995, 12750, 'in_stock', 41],
-      ['YB21WNP', 'Ford', 'Puma', 'ST-Line X', 2021, 'Blue', 'Petrol', 'Manual', 'SUV', 999, 22980, 15750, 13200, 'reserved', 18],
-      ['SK17FGH', 'Audi', 'A4', 'S Line TDI', 2017, 'White', 'Diesel', 'Automatic', 'Saloon', 1968, 89250, 11450, 8900, 'in_stock', 74],
-      ['LR69TMA', 'Toyota', 'Yaris', 'Icon Hybrid', 2019, 'Red', 'Hybrid', 'Automatic', 'Hatchback', 1490, 41100, 11250, 9100, 'in_stock', 9],
-      ['BD23OLV', 'Tesla', 'Model 3', 'Long Range', 2023, 'White', 'Electric', 'Automatic', 'Saloon', null, 18400, 26950, 23500, 'prep', 4],
-    ];
-    const names = ['Dave Harris', 'Priya Shah', 'Tom Nolan', 'Grace Bennett', 'Marcus Reid', 'Ellie Fry'];
-    const kinds = ['viewing', 'call', 'enquiry', 'call', 'viewing', 'test_drive', 'offer'];
-
-    samples.forEach((s, i) => {
-      const [plate, make, model, variant, year, colour, fuel, transmission, body, cc, mileage, asking, purchase, status, days] = s;
-      const created = new Date(now - days * 86400000).toISOString();
-      const id = uid();
-      db.vehicles.push({
-        id, plate: formatPlate(plate), plate_key: plateKey(plate), make, model, variant, year, colour,
-        fuel, transmission, body, engine_cc: cc, mileage, condition: 'good',
-        purchase_price: purchase, asking_price: asking, status,
-        date_in: created.slice(0, 10), stock_number: `S${1001 + i}`, location: 'Main forecourt',
-        service_history: 'Full service history', created_by: user.id, created_at: created, updated_at: created,
-      });
-      const events = Math.min(9, 2 + ((i * 3) % 8));
-      for (let e = 0; e < events; e++) {
-        const at = new Date(now - Math.max(1, days - e * 2) * 86400000 + e * 3600000).toISOString();
-        const kind = kinds[(i + e) % kinds.length];
-        db.activities.push({
-          id: uid(), vehicle_id: id, kind, contact_name: names[(i + e) % names.length],
-          contact_phone: `07${700 + ((i * 7 + e) % 99)} ${100000 + ((i * 13 + e * 7) % 899999)}`,
-          amount: kind === 'offer' ? 11800 + i * 250 : null,
-          notes: kind === 'call' ? 'Asked about the service history' : kind === 'offer' ? 'Cash today, no part-ex' : null,
-          occurred_at: at, user_id: user.id, user_name: user.name, created_at: at,
-        });
-      }
-    });
-
-    const soon = (h) => new Date(now + h * 3600000).toISOString();
-    const bookings = [
-      [2, 'collection', 'Priya Shah', '07700 900123', 26, 500, 'Paying balance on collection'],
-      [1, 'viewing', 'Tom Nolan', '07700 900456', 5, null, 'Coming after work'],
-      [0, 'test_drive', 'Grace Bennett', '07700 900789', 51, null, 'Bringing licence'],
-    ];
-    for (const [index, kind, customer, phone, hours, deposit, notes] of bookings) {
-      db.appointments.push({
-        id: uid(), vehicle_id: db.vehicles[index].id, kind, customer_name: customer,
-        customer_phone: phone, scheduled_at: soon(hours), status: 'scheduled',
-        deposit, notes, created_by: user.id, created_at: nowIso(), updated_at: nowIso(),
-      });
-    }
+    const demo = buildDemo(user);
+    db.vehicles.push(...demo.vehicles);
+    db.activities.push(...demo.activities);
+    db.appointments.push(...demo.appointments);
     save(db);
-    return { ok: true, added: samples.length };
+    return { ok: true, added: DEMO_SIZE };
   }],
 ];
 
@@ -2387,24 +2167,18 @@ globalThis.FORECOURT_LOCAL = async function localApi(path, { method = 'GET', bod
 /** CSV export: the deployed app links to the Worker, here we build it in-page. */
 globalThis.FORECOURT_CSV = function buildCsv() {
   const db = load();
-  const cols = ['plate', 'stock_number', 'make', 'model', 'variant', 'year', 'colour', 'fuel',
-    'transmission', 'mileage', 'status', 'purchase_price', 'prep_cost', 'asking_price',
-    'sold_price', 'date_in', 'date_sold', 'buyer_name', 'location', 'mot_expiry', 'vin'];
-  const escape = (v) => {
-    if (v === null || v === undefined) return '';
-    const s = String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [[...cols, 'viewings', 'calls', 'enquiries', 'days_in_stock', 'guide_retail'].join(',')];
+  const lines = [[...CSV_COLUMNS, 'viewings', 'calls', 'enquiries', 'days_in_stock', 'guide_retail'].join(',')];
   for (const v of db.vehicles) {
-    const c = counts(db, v.id);
+    const c = vehicleCounts(db, v.id);
     const est = estimateValue(v, { currency: db.dealership.currency, distanceUnit: db.dealership.distance_unit });
-    lines.push([...cols.map((k) => escape(v[k])), c.viewings, c.calls, c.enquiries,
+    lines.push([...CSV_COLUMNS.map((k) => csvCell(v[k])), c.viewings, c.calls, c.enquiries,
       daysBetween(v.date_in || v.created_at), est.retail].join(','));
   }
   return lines.join('\n');
 };
 
+
+/* ---- front end ---- */
 
 /* ---- the app ---- */
 
@@ -4269,6 +4043,14 @@ boot();
 
 /* ---- standalone extras ---- */
 
+/**
+ * The two things the standalone build has to do differently.
+ *
+ * The deployed app asks the Worker for a CSV and lets the browser download it,
+ * and it never runs out of storage. A single file opened from disk has neither
+ * luxury, so export is built in the page and the viewer is told, once, if the
+ * browser is refusing to keep anything.
+ */
 
 // The deployed app links CSV export at the Worker; here it is built in-page.
 document.addEventListener('click', async (event) => {
@@ -4307,6 +4089,5 @@ setInterval(() => {
 }, 4000);
 
 </script>
-
 </body>
 </html>

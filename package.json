@@ -1,0 +1,19 @@
+{
+  "name": "forecourt",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dealership stock, enquiry and diary tracker \u2014 Cloudflare Workers + D1.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply forecourt --local",
+    "migrate": "wrangler d1 migrations apply forecourt --remote",
+    "standalone": "node scripts/build-standalone.mjs",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.42.0"
+  }
+}
