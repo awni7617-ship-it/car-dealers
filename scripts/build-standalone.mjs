@@ -24,6 +24,7 @@ const MODULES = [
   ['sample stock', 'src/lib/demo.js'],
   ['storage', 'src/standalone/store.js'],
   ['local backend', 'src/standalone/local-api.js'],
+  ['makes and models', 'public/models.js'],
   ['front end', 'public/app.js'],
   ['standalone extras', 'src/standalone/extras.js'],
 ];

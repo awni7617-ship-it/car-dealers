@@ -2237,6 +2237,104 @@ globalThis.FORECOURT_CSV = function buildCsv() {
 };
 
 
+/* ---- makes and models ---- */
+
+/**
+ * Makes and models seen on UK pitches.
+ *
+ * Not a substitute for a registration lookup — it knows nothing about a
+ * particular car. What it does is turn the two worst fields to type into two
+ * fields you pick from, which is most of the benefit of a lookup on the builds
+ * that cannot make one (a published page is sandboxed from outside services).
+ *
+ * Deliberately the common stock of a small pitch rather than an exhaustive
+ * catalogue: a list of forty is a menu, a list of four hundred is a search
+ * problem. Anything missing is still free text — these are suggestions, never
+ * a constraint.
+ */
+
+const MODELS = {
+  Abarth: ['500', '595', '695'],
+  'Alfa Romeo': ['Giulietta', 'Giulia', 'Stelvio', 'MiTo', 'Tonale'],
+  'Aston Martin': ['DB11', 'Vantage', 'DBX'],
+  Audi: ['A1', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'Q2', 'Q3', 'Q5', 'Q7', 'Q8', 'TT', 'e-tron', 'RS3', 'S3'],
+  Bentley: ['Continental GT', 'Bentayga', 'Flying Spur'],
+  BMW: ['1 Series', '2 Series', '3 Series', '4 Series', '5 Series', '6 Series', '7 Series', '8 Series',
+    'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'Z4', 'i3', 'i4', 'iX', 'M2', 'M3', 'M4'],
+  Citroen: ['C1', 'C3', 'C3 Aircross', 'C4', 'C4 Cactus', 'C5 Aircross', 'Berlingo', 'DS3'],
+  Cupra: ['Formentor', 'Leon', 'Born', 'Ateca'],
+  Dacia: ['Sandero', 'Duster', 'Jogger', 'Spring'],
+  DS: ['DS 3', 'DS 4', 'DS 7'],
+  Fiat: ['500', '500X', '500L', 'Panda', 'Tipo', 'Ducato'],
+  Ford: ['Fiesta', 'Focus', 'Puma', 'Kuga', 'EcoSport', 'Mondeo', 'Mustang', 'Mustang Mach-E',
+    'Transit', 'Transit Custom', 'Ranger', 'S-Max', 'Galaxy', 'Ka'],
+  Honda: ['Jazz', 'Civic', 'CR-V', 'HR-V', 'e'],
+  Hyundai: ['i10', 'i20', 'i30', 'Tucson', 'Kona', 'Santa Fe', 'Ioniq', 'Ioniq 5', 'Bayon'],
+  Jaguar: ['XE', 'XF', 'F-Pace', 'E-Pace', 'I-Pace', 'F-Type'],
+  Jeep: ['Renegade', 'Compass', 'Wrangler', 'Avenger'],
+  Kia: ['Picanto', 'Rio', 'Ceed', 'Sportage', 'Niro', 'Sorento', 'EV6', 'Stonic', 'Soul'],
+  'Land Rover': ['Defender', 'Discovery', 'Discovery Sport', 'Range Rover', 'Range Rover Sport',
+    'Range Rover Evoque', 'Range Rover Velar', 'Freelander'],
+  Lexus: ['CT', 'IS', 'NX', 'RX', 'UX', 'ES'],
+  Mazda: ['2', '3', '6', 'CX-3', 'CX-30', 'CX-5', 'MX-5', 'MX-30'],
+  Mercedes: ['A-Class', 'B-Class', 'C-Class', 'E-Class', 'S-Class', 'CLA', 'CLS', 'GLA', 'GLB', 'GLC',
+    'GLE', 'GLS', 'V-Class', 'Sprinter', 'Vito', 'EQA', 'EQC'],
+  MG: ['3', 'ZS', 'HS', 'MG4', 'MG5'],
+  Mini: ['Hatch', 'Clubman', 'Countryman', 'Convertible', 'Electric'],
+  Mitsubishi: ['Outlander', 'ASX', 'Eclipse Cross', 'L200', 'Shogun'],
+  Nissan: ['Micra', 'Juke', 'Qashqai', 'X-Trail', 'Leaf', 'Ariya', 'Note', 'Navara'],
+  Peugeot: ['108', '208', '308', '508', '2008', '3008', '5008', 'Partner', 'Boxer', 'Rifter'],
+  Polestar: ['2', '3'],
+  Porsche: ['911', 'Cayenne', 'Macan', 'Panamera', 'Taycan', 'Boxster', 'Cayman'],
+  Renault: ['Clio', 'Captur', 'Megane', 'Kadjar', 'Zoe', 'Scenic', 'Trafic', 'Austral'],
+  Seat: ['Ibiza', 'Leon', 'Arona', 'Ateca', 'Tarraco', 'Mii'],
+  Skoda: ['Citigo', 'Fabia', 'Scala', 'Octavia', 'Superb', 'Kamiq', 'Karoq', 'Kodiaq', 'Enyaq'],
+  Smart: ['ForTwo', 'ForFour'],
+  Subaru: ['Forester', 'Outback', 'XV', 'Impreza'],
+  Suzuki: ['Swift', 'Vitara', 'S-Cross', 'Ignis', 'Jimny'],
+  Tesla: ['Model 3', 'Model Y', 'Model S', 'Model X'],
+  Toyota: ['Aygo', 'Yaris', 'Yaris Cross', 'Corolla', 'C-HR', 'RAV4', 'Prius', 'Hilux', 'Proace', 'Auris'],
+  Vauxhall: ['Corsa', 'Astra', 'Insignia', 'Mokka', 'Crossland', 'Grandland', 'Zafira', 'Vivaro',
+    'Combo', 'Adam', 'Viva'],
+  Volkswagen: ['up!', 'Polo', 'Golf', 'Passat', 'Arteon', 'T-Cross', 'T-Roc', 'Tiguan', 'Touareg',
+    'Touran', 'Sharan', 'Caddy', 'Transporter', 'ID.3', 'ID.4', 'Scirocco', 'Beetle'],
+  Volvo: ['V40', 'V60', 'V90', 'S60', 'S90', 'XC40', 'XC60', 'XC90'],
+};
+
+const MAKES = Object.keys(MODELS).sort();
+
+/**
+ * Models for a make, matched however the dealer typed it — "vw", "merc" and
+ * "landrover" all find the right list, because nobody types "Volkswagen".
+ */
+const ALIASES = {
+  vw: 'Volkswagen',
+  merc: 'Mercedes',
+  'mercedes-benz': 'Mercedes',
+  benz: 'Mercedes',
+  landrover: 'Land Rover',
+  rangerover: 'Land Rover',
+  alfa: 'Alfa Romeo',
+  astonmartin: 'Aston Martin',
+  vauxhal: 'Vauxhall',
+};
+
+function modelsFor(make) {
+  const typed = String(make || '').trim();
+  if (!typed) return [];
+  const key = typed.toLowerCase().replace(/[^a-z]/g, '');
+  const alias = ALIASES[key];
+  if (alias) return MODELS[alias] || [];
+
+  const exact = MAKES.find((m) => m.toLowerCase() === typed.toLowerCase());
+  if (exact) return MODELS[exact];
+
+  // A make half-typed still narrows the models — "volk" is enough.
+  const partial = MAKES.find((m) => m.toLowerCase().replace(/[^a-z]/g, '').startsWith(key));
+  return partial ? MODELS[partial] : [];
+}
+
+
 /* ---- front end ---- */
 
 /* ---- the app ---- */
@@ -2245,6 +2343,7 @@ globalThis.FORECOURT_CSV = function buildCsv() {
    Forecourt — front end
    Vanilla JS, no build step. Hash routing, one render pass per view.
    ================================================================== */
+
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -3520,6 +3619,8 @@ function openAddVehicle() {
 }
 
 const DATALISTS = `
+  <datalist id="dl-make">${MAKES.map((m) => `<option>${esc(m)}</option>`).join('')}</datalist>
+  <datalist id="dl-model"></datalist>
   <datalist id="dl-fuel"><option>Petrol</option><option>Diesel</option><option>Hybrid</option>
     <option>Plug-in hybrid</option><option>Electric</option><option>LPG</option></datalist>
   <datalist id="dl-trans"><option>Manual</option><option>Automatic</option><option>Semi-automatic</option></datalist>
@@ -3540,8 +3641,10 @@ function openVehicleForm(v = {}) {
       ${isEdit ? '' : `<div class="field"><label for="vf-plate">Registration</label>
         <input id="vf-plate" value="${f('plate')}" autocapitalize="characters" spellcheck="false" /></div>`}
       <div class="row-3">
-        <div class="field"><label for="vf-make">Make</label><input id="vf-make" value="${f('make')}" autofocus /></div>
-        <div class="field"><label for="vf-model">Model</label><input id="vf-model" value="${f('model')}" /></div>
+        <div class="field"><label for="vf-make">Make</label>
+          <input id="vf-make" list="dl-make" value="${f('make')}" autofocus /></div>
+        <div class="field"><label for="vf-model">Model</label>
+          <input id="vf-model" list="dl-model" value="${f('model')}" /></div>
         <div class="field"><label for="vf-variant">Trim</label><input id="vf-variant" value="${f('variant')}" placeholder="e.g. Sport Nav" /></div>
       </div>
       <div class="row-3">
@@ -3623,6 +3726,17 @@ function openVehicleForm(v = {}) {
           }
         } catch { /* guide is a nicety, never blocks saving */ }
       }, 450);
+
+      // Picking a make narrows the model list to that make's own range, so the
+      // second field is a short menu rather than a blank box.
+      const makeInput = $('#vf-make', root);
+      const modelList = $('#dl-model', root);
+      const refreshModels = () => {
+        modelList.innerHTML = modelsFor(makeInput.value)
+          .map((m) => `<option>${esc(m)}</option>`).join('');
+      };
+      makeInput.addEventListener('input', refreshModels);
+      refreshModels();
 
       $$('input, select', root).forEach((el) => el.addEventListener('input', refreshGuide));
       refreshGuide();
@@ -3977,7 +4091,9 @@ function renderSettings() {
         </div>
         <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
         <div class="card-head"><h3>Data</h3></div>
-        <p class="hint" style="margin-bottom:10px">Everything lives in your own Cloudflare D1 database.</p>
+        <p class="hint" style="margin-bottom:10px">${globalThis.FORECOURT_SHARED
+          ? 'Everything lives in this page. Each change saves a new version, so everyone with the link sees the same stock.'
+          : 'Everything lives in your own Cloudflare D1 database.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <a class="btn btn-secondary btn-sm" href="/api/export/stock.csv" download>Export stock CSV</a>
           <button class="btn btn-ghost btn-sm" id="s-theme" type="button">Switch theme</button>
@@ -3991,11 +4107,14 @@ function renderSettings() {
           Forecourt reads every registration offline — format, age identifier, the date window it was issued in and
           the DVLA office that issued it — and decodes any VIN through the free NHTSA database.
         </p>
-        <p style="color:var(--muted);font-size:14px;margin-top:10px">
-          For live make, colour, fuel, engine size, MOT and tax straight from the plate, add a free DVLA key as a
-          Worker secret named <code style="font-family:var(--mono)">DVLA_API_KEY</code>, or point
-          <code style="font-family:var(--mono)">LOOKUP_URL</code> at any provider you already pay for. Nothing else
-          in the app changes.
+        <p style="color:var(--muted);font-size:14px;margin-top:10px">${globalThis.FORECOURT_SHARED
+          ? `A shared page cannot call outside services — that sandbox is what makes it safe to hand round — so
+             there is no DVLA lookup here and no key to add. Make and model suggest as you type instead. For live
+             lookup from the registration, run the Cloudflare version, where a key can be held server-side.`
+          : `For live make, colour, fuel, engine size, MOT and tax straight from the plate, add a free DVLA key as a
+             Worker secret named <code style="font-family:var(--mono)">DVLA_API_KEY</code>, or point
+             <code style="font-family:var(--mono)">LOOKUP_URL</code> at any provider you already pay for. Nothing
+             else in the app changes.`}
         </p>
       </div>
     </div>`;

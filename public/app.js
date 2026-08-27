@@ -5,6 +5,8 @@
    Vanilla JS, no build step. Hash routing, one render pass per view.
    ================================================================== */
 
+import { MAKES, modelsFor } from './models.js';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -1279,6 +1281,8 @@ function openAddVehicle() {
 }
 
 const DATALISTS = `
+  <datalist id="dl-make">${MAKES.map((m) => `<option>${esc(m)}</option>`).join('')}</datalist>
+  <datalist id="dl-model"></datalist>
   <datalist id="dl-fuel"><option>Petrol</option><option>Diesel</option><option>Hybrid</option>
     <option>Plug-in hybrid</option><option>Electric</option><option>LPG</option></datalist>
   <datalist id="dl-trans"><option>Manual</option><option>Automatic</option><option>Semi-automatic</option></datalist>
@@ -1299,8 +1303,10 @@ function openVehicleForm(v = {}) {
       ${isEdit ? '' : `<div class="field"><label for="vf-plate">Registration</label>
         <input id="vf-plate" value="${f('plate')}" autocapitalize="characters" spellcheck="false" /></div>`}
       <div class="row-3">
-        <div class="field"><label for="vf-make">Make</label><input id="vf-make" value="${f('make')}" autofocus /></div>
-        <div class="field"><label for="vf-model">Model</label><input id="vf-model" value="${f('model')}" /></div>
+        <div class="field"><label for="vf-make">Make</label>
+          <input id="vf-make" list="dl-make" value="${f('make')}" autofocus /></div>
+        <div class="field"><label for="vf-model">Model</label>
+          <input id="vf-model" list="dl-model" value="${f('model')}" /></div>
         <div class="field"><label for="vf-variant">Trim</label><input id="vf-variant" value="${f('variant')}" placeholder="e.g. Sport Nav" /></div>
       </div>
       <div class="row-3">
@@ -1382,6 +1388,17 @@ function openVehicleForm(v = {}) {
           }
         } catch { /* guide is a nicety, never blocks saving */ }
       }, 450);
+
+      // Picking a make narrows the model list to that make's own range, so the
+      // second field is a short menu rather than a blank box.
+      const makeInput = $('#vf-make', root);
+      const modelList = $('#dl-model', root);
+      const refreshModels = () => {
+        modelList.innerHTML = modelsFor(makeInput.value)
+          .map((m) => `<option>${esc(m)}</option>`).join('');
+      };
+      makeInput.addEventListener('input', refreshModels);
+      refreshModels();
 
       $$('input, select', root).forEach((el) => el.addEventListener('input', refreshGuide));
       refreshGuide();
@@ -1736,7 +1753,9 @@ function renderSettings() {
         </div>
         <hr style="border:0;border-top:1px solid var(--line);margin:18px 0" />
         <div class="card-head"><h3>Data</h3></div>
-        <p class="hint" style="margin-bottom:10px">Everything lives in your own Cloudflare D1 database.</p>
+        <p class="hint" style="margin-bottom:10px">${globalThis.FORECOURT_SHARED
+          ? 'Everything lives in this page. Each change saves a new version, so everyone with the link sees the same stock.'
+          : 'Everything lives in your own Cloudflare D1 database.'}</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <a class="btn btn-secondary btn-sm" href="/api/export/stock.csv" download>Export stock CSV</a>
           <button class="btn btn-ghost btn-sm" id="s-theme" type="button">Switch theme</button>
@@ -1750,11 +1769,14 @@ function renderSettings() {
           Forecourt reads every registration offline — format, age identifier, the date window it was issued in and
           the DVLA office that issued it — and decodes any VIN through the free NHTSA database.
         </p>
-        <p style="color:var(--muted);font-size:14px;margin-top:10px">
-          For live make, colour, fuel, engine size, MOT and tax straight from the plate, add a free DVLA key as a
-          Worker secret named <code style="font-family:var(--mono)">DVLA_API_KEY</code>, or point
-          <code style="font-family:var(--mono)">LOOKUP_URL</code> at any provider you already pay for. Nothing else
-          in the app changes.
+        <p style="color:var(--muted);font-size:14px;margin-top:10px">${globalThis.FORECOURT_SHARED
+          ? `A shared page cannot call outside services — that sandbox is what makes it safe to hand round — so
+             there is no DVLA lookup here and no key to add. Make and model suggest as you type instead. For live
+             lookup from the registration, run the Cloudflare version, where a key can be held server-side.`
+          : `For live make, colour, fuel, engine size, MOT and tax straight from the plate, add a free DVLA key as a
+             Worker secret named <code style="font-family:var(--mono)">DVLA_API_KEY</code>, or point
+             <code style="font-family:var(--mono)">LOOKUP_URL</code> at any provider you already pay for. Nothing
+             else in the app changes.`}
         </p>
       </div>
     </div>`;
