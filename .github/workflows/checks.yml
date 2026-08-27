@@ -3,10 +3,11 @@ name: Checks
 on:
   pull_request:
   push:
-    branches-ignore: [main]
 
 jobs:
   test:
+    # The deploy workflow already tests the default branch before it ships.
+    if: github.ref_name != github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

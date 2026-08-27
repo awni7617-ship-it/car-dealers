@@ -5,7 +5,7 @@ car identifies itself, and Forecourt keeps the score from there: who came to
 look, who rang, who is collecting it on Saturday, and what it is worth today.
 
 Runs on Cloudflare Workers with a D1 database, deployed from GitHub on every
-push to `main`.
+push to the default branch.
 
 ## What it does
 
@@ -34,7 +34,7 @@ dark setting.
 ## Deploying it
 
 Two secrets in the GitHub repository (**Settings → Secrets and variables →
-Actions**) and every push to `main` deploys:
+Actions**) and every push to the default branch deploys:
 
 | Secret | Where it comes from |
 | --- | --- |

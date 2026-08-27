@@ -1,11 +1,11 @@
 name: Deploy
 
-# Every push to main goes live. The two secrets below are all it takes:
+# Every push to the default branch goes live. The two secrets below are all it
+# takes:
 #   CLOUDFLARE_API_TOKEN   — "Edit Cloudflare Workers" template, plus D1 edit
 #   CLOUDFLARE_ACCOUNT_ID  — from the Cloudflare dashboard sidebar
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -14,6 +14,9 @@ concurrency:
 
 jobs:
   deploy:
+    # Whatever this repository's default branch happens to be called — naming it
+    # here would quietly stop deploying the day it is renamed.
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
