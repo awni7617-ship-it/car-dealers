@@ -22,16 +22,21 @@ const normalise = (v) => {
 
 const plain = (row) => (row ? { ...row } : row);
 
-export function createTestD1() {
+export function createTestD1({ empty = false } = {}) {
   const sqlite = new DatabaseSync(':memory:');
-  // FORECOURT_SCHEMA runs the suite against a schema dumped from a real D1
-  // database instead of the migrations — the way to prove that what is
-  // actually deployed still satisfies the app, not just what should be.
-  if (process.env.FORECOURT_SCHEMA) {
-    sqlite.exec(readFileSync(process.env.FORECOURT_SCHEMA, 'utf8'));
-  } else {
-    for (const file of readdirSync(join(root, 'migrations')).sort()) {
-      if (file.endsWith('.sql')) sqlite.exec(readFileSync(join(root, 'migrations', file), 'utf8'));
+
+  // `empty` leaves the database with no tables at all, which is what the
+  // one-click deploy hands the Worker. Everything else starts migrated.
+  if (!empty) {
+    // FORECOURT_SCHEMA runs the suite against a schema dumped from a real D1
+    // database instead of the migrations — the way to prove that what is
+    // actually deployed still satisfies the app, not just what should be.
+    if (process.env.FORECOURT_SCHEMA) {
+      sqlite.exec(readFileSync(process.env.FORECOURT_SCHEMA, 'utf8'));
+    } else {
+      for (const file of readdirSync(join(root, 'migrations')).sort()) {
+        if (file.endsWith('.sql')) sqlite.exec(readFileSync(join(root, 'migrations', file), 'utf8'));
+      }
     }
   }
 
@@ -70,9 +75,9 @@ export function createTestD1() {
 }
 
 /** A Worker env with a fresh database and no third-party lookup keys. */
-export function testEnv() {
+export function testEnv(options = {}) {
   return {
-    DB: createTestD1(),
+    DB: createTestD1(options),
     ASSETS: { fetch: async () => new Response('<!doctype html>app shell', { headers: { 'content-type': 'text/html' } }) },
   };
 }

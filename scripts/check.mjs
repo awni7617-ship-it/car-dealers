@@ -1,32 +1,49 @@
 /**
- * forecourt.html is generated, so it can go stale the moment someone edits a
- * source file and forgets to rebuild. This rebuilds it in memory and compares,
- * which is what CI runs — the fix is always `npm run standalone`.
+ * Two files in this repository are generated, and both go stale the moment
+ * someone edits a source and forgets to rebuild:
+ *
+ *   forecourt.html          from public/ and src/     (npm run standalone)
+ *   migrations/0001_init.sql from src/lib/schema.js   (npm run build:migration)
+ *
+ * A stale migration is the dangerous one — the Worker would create tables from
+ * schema.js that wrangler's migration never made, and the two databases would
+ * quietly disagree. This rebuilds both and fails if either moved, leaving the
+ * working tree exactly as it found it: CI should fail, not silently fix.
  */
 import { execFile } from 'node:child_process';
-import { readFile, writeFile, rm } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const target = join(root, 'forecourt.html');
+const run = (script) => promisify(execFile)(process.execPath, [join(root, script)], { cwd: root });
 
-const before = await readFile(target, 'utf8').catch(() => null);
-await promisify(execFile)(process.execPath, [join(root, 'scripts/build-standalone.mjs')], { cwd: root });
-const after = await readFile(target, 'utf8');
+const GENERATED = [
+  { file: 'forecourt.html', script: 'scripts/build-standalone.mjs', fix: 'npm run standalone' },
+  { file: 'migrations/0001_init.sql', script: 'scripts/build-migration.mjs', fix: 'npm run build:migration' },
+];
 
-if (before === after) {
-  console.log('forecourt.html is up to date.');
-  process.exit(0);
+let stale = false;
+
+for (const { file, script, fix } of GENERATED) {
+  const path = join(root, file);
+  const before = await readFile(path, 'utf8').catch(() => null);
+  await run(script);
+  const after = await readFile(path, 'utf8');
+
+  if (before === after) {
+    console.log(`${file} is up to date.`);
+    continue;
+  }
+
+  stale = true;
+  if (before === null) {
+    console.error(`${file} was missing — it has now been built. Commit it.`);
+  } else {
+    await writeFile(path, before);
+    console.error(`${file} is out of date with its sources. Run: ${fix}`);
+  }
 }
 
-if (before === null) {
-  console.error('forecourt.html was missing — it has now been built. Commit it.');
-  process.exit(1);
-}
-
-// Leave the working tree as it was found; CI should fail, not silently fix.
-await writeFile(target, before);
-console.error('forecourt.html is out of date with the sources. Run: npm run standalone');
-process.exit(1);
+process.exit(stale ? 1 : 0);

@@ -33,6 +33,20 @@ dark setting.
 
 ## Deploying it
 
+### One click, nothing installed
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/awni7617-ship-it/car-dealers)
+
+Cloudflare clones the repository, creates the database and the KV namespace,
+asks for a `DVLA_API_KEY` if you have one, builds and deploys — all in the
+browser, no terminal. Every later push deploys automatically.
+
+It hands the Worker a brand-new empty database and does not run migrations, so
+the Worker creates its own tables the first time it finds them missing. A fresh
+deploy comes up working rather than throwing errors at whoever signs up first.
+
+### The rest of this section is for deploying by hand
+
 The Worker is `car-dealers`; the database is the D1 instance named `forecourt`.
 Both ids are in `wrangler.jsonc` already, so a deploy needs no configuration.
 

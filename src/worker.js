@@ -9,6 +9,7 @@
 import { ROUTES, exportCsv } from './api.js';
 import { currentUser } from './session.js';
 import { ApiError } from './lib/model.js';
+import { ensureSchema, isMissingTable } from './lib/schema.js';
 
 /** Routes reachable without a session. Everything else needs one. */
 const OPEN = ['/auth/signup', '/auth/join', '/auth/login', '/auth/logout'];
@@ -33,6 +34,29 @@ function sameOrigin(request, url) {
   }
 }
 
+/**
+ * A Worker can meet a database nobody has migrated — the one-click deploy
+ * provisions an empty D1 and never runs wrangler's migrations. So rather than
+ * check on every request, assume the tables are there and only set them up
+ * when something says otherwise. Costs nothing in the normal case and turns a
+ * broken deploy into a working one.
+ */
+// Tracked against the binding rather than in a plain flag, so a Worker holding
+// two databases cannot decide both are fine because one was.
+const healed = new WeakSet();
+
+async function withSchema(env, work) {
+  try {
+    return await work();
+  } catch (err) {
+    if (healed.has(env.DB) || !isMissingTable(err)) throw err;
+    healed.add(env.DB);
+    console.log('Database has no tables yet — creating them.');
+    await ensureSchema(env);
+    return work();
+  }
+}
+
 async function handleApi(request, env, url) {
   const path = url.pathname.replace(/^\/api/, '') || '/';
   const method = request.method.toUpperCase();
@@ -41,7 +65,9 @@ async function handleApi(request, env, url) {
     return json({ error: 'Request blocked: unexpected origin' }, 403);
   }
 
-  const user = await currentUser(env, request);
+  // The first query of the request, so a database with no tables is set up
+  // here rather than surfacing as a failed sign-in.
+  const user = await withSchema(env, () => currentUser(env, request));
   if (!user && !OPEN.includes(path)) {
     return json({ error: 'Sign in to continue' }, 401);
   }
@@ -87,7 +113,10 @@ async function handleApi(request, env, url) {
     const match = path.match(pattern);
     if (!match) continue;
     try {
-      const data = await handler({ ...context, params: match.slice(1) });
+      // Signing up is the first thing a new deployment does, and it reaches the
+      // database here rather than above — a request with no cookie never gets
+      // as far as looking a session up — so the handler needs covering too.
+      const data = await withSchema(env, () => handler({ ...context, params: match.slice(1) }));
       return json(data ?? { ok: true }, 200, cookie ? { 'set-cookie': cookie } : {});
     } catch (err) {
       if (err instanceof ApiError) {

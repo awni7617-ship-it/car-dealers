@@ -439,3 +439,24 @@ test('the front end is served for a deep link, and the health check answers', as
   assert.equal(health.data.ok, true);
   assert.equal(health.data.database, true);
 });
+
+test('a database nobody migrated sets itself up rather than failing', async () => {
+  // Exactly what the one-click deploy produces: a D1 instance with nothing in
+  // it. The app has to come up anyway.
+  const env = testEnv({ empty: true });
+  assert.equal(env.DB._sqlite.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table'").get().n, 0);
+
+  const { client: c, res } = await signUp(env);
+  assert.equal(res.status, 200, 'signing up creates the tables it needs');
+  assert.equal(res.data.user.dealership.name, 'Ridgeway Motors');
+
+  const { data: { vehicle } } = await c.post('/vehicles', { plate: 'LT20XYZ', make: 'Volkswagen', asking_price: 13495 });
+  await c.post(`/vehicles/${vehicle.id}/activities`, { kind: 'viewing', contactName: 'Dave' });
+  assert.equal((await c.get('/vehicles')).data.vehicles.length, 1);
+  assert.equal((await c.get('/dashboard')).data.stock.live, 1);
+
+  const tables = env.DB._sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all().map((r) => r.name);
+  assert.deepEqual(tables, ['activities', 'appointments', 'dealerships', 'plate_cache', 'sessions', 'users', 'valuations', 'vehicles']);
+});
