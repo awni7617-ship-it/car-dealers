@@ -12,7 +12,7 @@
     "standalone": "node scripts/build-standalone.mjs",
     "test": "node --test \"tests/**/*.test.js\"",
     "check": "node scripts/check.mjs",
-    "deploy:cf": "wrangler d1 migrations apply forecourt --remote && wrangler deploy"
+    "deploy:cf": "CI=true wrangler d1 migrations apply forecourt --remote && CI=true wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "^4.42.0"
