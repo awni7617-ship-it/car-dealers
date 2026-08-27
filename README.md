@@ -7,6 +7,25 @@ look, who rang, who is collecting it on Saturday, and what it is worth today.
 Runs on Cloudflare Workers with a D1 database, deployed from GitHub on every
 push to the default branch.
 
+## Start here
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/awni7617-ship-it/car-dealers)
+
+One click. Cloudflare creates the database, asks for a DVLA key if you have
+one, builds and deploys. No terminal, nothing to install. Every later push
+deploys itself.
+
+**Which thing do I use?**
+
+| I want | Use | Needs |
+| --- | --- | --- |
+| The real app — accounts, team, plate lookup | the button above | one click, a Cloudflare account |
+| A page I can share on a link, no setup at all | `npm run artifact`, publish it | no lookup: a shared page cannot call DVLA |
+| One file to open from a folder or drag onto any host | `dist-static/index.html` | data stays in that one browser |
+
+The plate lookup only works in the first one. A key has to live on a server, or
+anyone who opens the page can take it.
+
 ## What it does
 
 - **Accounts per dealership.** Sign up once, then everyone else joins with the
