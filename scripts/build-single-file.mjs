@@ -1,0 +1,134 @@
+/**
+ * Builds dist-worker/worker.js — the entire app as one file you can paste into
+ * the Cloudflare dashboard's code editor.
+ *
+ * Why this exists: the normal way to deploy a Worker with a front end is a Git
+ * connection or a terminal. Someone who has neither still deserves the real
+ * app — accounts, a database, live plate lookup — rather than the cut-down
+ * browser-only version. So the front end is inlined into the Worker as a
+ * string and served from `/`, and everything else is bundled around it.
+ *
+ * The page is embedded with JSON.stringify rather than a template literal: the
+ * front end is full of backticks and ${...}, and any of them would otherwise
+ * end the string early or execute on the server.
+ *
+ * Nothing is minified. What gets pasted stays readable, and stays diffable
+ * against the sources it came from.
+ *
+ * Run: npm run single
+ */
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (path) => readFile(join(root, path), 'utf8');
+
+/* ---------------------------------------------------------------- the page */
+
+const [html, css, models, app] = await Promise.all([
+  read('public/index.html'),
+  read('public/app.css'),
+  read('public/models.js'),
+  read('public/app.js'),
+]);
+
+// The front end, exactly as the hosted build serves it, with the stylesheet and
+// script inlined because there are no separate asset files here to fetch.
+const clientScript = [models, app]
+  .map((source) => source
+    .replace(/^import\s+[\s\S]*?from\s+'[^']+';\n/gm, '')
+    .replace(/^export\s+(?=(const|function|async|class|let))/gm, '')
+    .trim())
+  .join('\n\n');
+
+const page = html
+  .replace('<link rel="stylesheet" href="/app.css">', () => `<style>\n${css.trim()}\n</style>`)
+  .replace('<link rel="icon" href="/favicon.svg">', '')
+  .replace('<link rel="manifest" href="/manifest.webmanifest">', '')
+  .replace(
+    '<script type="module" src="/app.js"></script>',
+    () => `<script type="module">\n${clientScript}\n</script>`,
+  );
+
+/* ---------------------------------------------------------------- bundling */
+
+// esbuild, by way of wrangler, does the module resolution. Hand-flattening the
+// server the way the single-page builds do would be a second implementation of
+// the same job, and a worse one.
+const build = join(root, '.build-single');
+await rm(build, { recursive: true, force: true });
+await mkdir(build, { recursive: true });
+
+await writeFile(join(build, 'page.js'), `// Generated. The front end, as a string.\nexport const PAGE = ${JSON.stringify(page)};\n`);
+
+await writeFile(join(build, 'entry.js'), `/**
+ * Single-file entry. Identical to src/worker.js except that the front end
+ * comes from a string rather than from an ASSETS binding, because a pasted
+ * Worker has no asset store behind it.
+ */
+import worker from '../src/worker.js';
+import { PAGE } from './page.js';
+
+const html = () => new Response(PAGE, {
+  headers: {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'strict-origin-when-cross-origin',
+  },
+});
+
+export default {
+  fetch(request, env, ctx) {
+    // Stand in for the asset store the hosted build has, so every path that is
+    // not the API answers with the app shell and the hash router takes over.
+    return worker.fetch(request, { ...env, ASSETS: { fetch: async () => html() } }, ctx);
+  },
+  scheduled: worker.scheduled,
+};
+`);
+
+await writeFile(join(build, 'wrangler.jsonc'), JSON.stringify({
+  name: 'forecourt',
+  main: 'entry.js',
+  compatibility_date: '2025-08-01',
+  d1_databases: [{ binding: 'DB', database_name: 'forecourt', database_id: '00000000-0000-0000-0000-000000000000' }],
+}, null, 2));
+
+const out = join(root, 'dist-worker');
+await rm(out, { recursive: true, force: true });
+
+await promisify(execFile)('npx', [
+  'wrangler', 'deploy', '--dry-run', '--outdir', out,
+  '--config', join(build, 'wrangler.jsonc'),
+], { cwd: root, env: { ...process.env, CI: 'true' } });
+
+const bundled = await readFile(join(out, 'entry.js'), 'utf8');
+
+const header = `// Forecourt — the whole app in one file.
+//
+// Paste this into the Cloudflare dashboard: Workers & Pages -> your Worker ->
+// Edit code -> select all -> paste -> Deploy.
+//
+// Then give it a database, once:
+//   Settings -> Bindings -> Add -> D1 database
+//   Variable name: DB
+//   Database: forecourt  (create it under Storage & Databases -> D1 if it is
+//   not there yet — it can be empty, the app creates its own tables)
+//
+// The DVLA key does NOT go in here. Open the app, sign up, and paste it into
+// Settings -> Number plate lookups, where it is stored server-side.
+//
+// Generated by \`npm run single\` from the sources in this project.
+
+`;
+
+await writeFile(join(out, 'worker.js'), header + bundled);
+await rm(join(out, 'entry.js'), { force: true });
+await rm(build, { recursive: true, force: true });
+
+const size = (header.length + bundled.length) / 1024;
+console.log(`dist-worker/worker.js — ${size.toFixed(0)} KB (Worker limit is 3 MB on the free plan)`);

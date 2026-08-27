@@ -7,3 +7,5 @@ dist/
 .DS_Store
 dist-static/
 dist-shared/
+dist-worker/
+.build-single/
