@@ -33,28 +33,56 @@ dark setting.
 
 ## Deploying it
 
-Two secrets in the GitHub repository (**Settings → Secrets and variables →
-Actions**) and every push to the default branch deploys:
+The Worker is `car-dealers`; the database is the D1 instance named `forecourt`.
+Both ids are in `wrangler.jsonc` already, so a deploy needs no configuration.
+
+**Two things decide whether a deploy does anything at all**, and both have bitten
+this project already:
+
+1. **The code has to be on the branch Cloudflare builds.** That is the
+   repository's default branch unless the build was told otherwise. A branch
+   with no `wrangler.jsonc` on it builds nothing and leaves the Worker showing
+   Cloudflare's "Hello world" placeholder.
+2. **The ids in `wrangler.jsonc` have to be real.** A placeholder `database_id`
+   fails the deploy outright.
+
+### From the Cloudflare dashboard (Workers → Git)
+
+Connect the repository, then set:
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm ci` |
+| Deploy command | `npm run deploy:cf` |
+| Branch | the branch you want live |
+
+`deploy:cf` applies any new migrations before deploying, so the schema is never
+behind the code.
+
+### From GitHub Actions
+
+Add two repository secrets (**Settings → Secrets and variables → Actions**) and
+every push to the default branch deploys:
 
 | Secret | Where it comes from |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → *Edit Cloudflare Workers* template, with **D1: Edit** and **Workers KV: Edit** added |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard sidebar, or `npx wrangler whoami` |
 
-The workflow in `.github/workflows/deploy.yml` runs the tests, creates the D1
-database and KV namespace if this is the first deploy, applies any new
-migrations, then deploys. Nothing else to set up: the app is live at
-`https://forecourt.<your-subdomain>.workers.dev`.
+`.github/workflows/deploy.yml` runs the tests, provisions D1 and KV if they are
+missing, applies migrations, then deploys.
 
-To deploy from your own machine instead:
+### From your own machine
 
 ```sh
 npm install
-export CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=...
-npm run provision                              # creates D1/KV, fills in the ids
-npx wrangler d1 migrations apply forecourt --remote
-npm run deploy
+npx wrangler login
+npm run deploy:cf
 ```
+
+Deploying into a *different* Cloudflare account? `npm run provision` (with
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set) creates the database and
+namespace there and rewrites the ids in `wrangler.jsonc`.
 
 ## Running it locally
 

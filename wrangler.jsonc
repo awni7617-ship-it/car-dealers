@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "forecourt",
+
+  // Matches the Worker in the Cloudflare account, so a deploy lands on the URL
+  // that is already being watched rather than quietly creating a second Worker.
+  "name": "car-dealers",
   "main": "src/worker.js",
   "compatibility_date": "2025-08-01",
 
@@ -12,14 +15,15 @@
     "binding": "ASSETS"
   },
 
-  // `database_id` is a placeholder so `wrangler dev` works out of the box on a
-  // local SQLite file. `npm run provision` (and the GitHub deploy) replaces it
-  // with the real database before anything is deployed.
+  // Real ids, committed on purpose: they identify resources, they are not
+  // credentials, and nothing can be done with them without an API token. A
+  // placeholder here fails the deploy — which is exactly what happened before.
+  // `npm run provision` rewrites them when deploying into a different account.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "forecourt",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "2f89b92d-9233-4ec2-b04d-7457deb3dcc7",
       "migrations_dir": "migrations"
     }
   ],
@@ -29,7 +33,7 @@
   "kv_namespaces": [
     {
       "binding": "RATE_LIMIT",
-      "id": "00000000000000000000000000000000"
+      "id": "725fe8a42bdd49a2864a534828794bfa"
     }
   ],
 
