@@ -91,6 +91,46 @@ async function stockList(env, user) {
   }));
 }
 
+/* ---------------------------------------------------------------- settings */
+
+/**
+ * A dealership's own lookup credentials, kept in the database so they can be
+ * pasted into the app rather than set as a Worker secret — the people running
+ * this do not have a terminal, and a key they cannot enter is a key they do
+ * not have.
+ *
+ * Anything set here wins over the deployment-wide environment, so one Worker
+ * can serve several pitches each paying for their own lookups.
+ */
+const LOOKUP_SETTINGS = ['DVLA_API_KEY', 'LOOKUP_URL', 'LOOKUP_KEY', 'LOOKUP_HEADER', 'LOOKUP_NAME'];
+
+async function lookupEnv(env, user) {
+  const rows = await all(env, 'SELECT name, value FROM settings WHERE dealership_id = ?', user.dealership_id);
+  const own = {};
+  for (const row of rows) {
+    if (LOOKUP_SETTINGS.includes(row.name) && row.value) own[row.name] = row.value;
+  }
+  // env last would let a deployment-wide key mask the one they just typed.
+  return { ...env, ...own };
+}
+
+/** Which lookups are configured — never the values themselves. */
+async function lookupStatus(env, user) {
+  const active = await lookupEnv(env, user);
+  const rows = await all(env, 'SELECT name FROM settings WHERE dealership_id = ? AND value IS NOT NULL AND value != \'\'',
+    user.dealership_id);
+  const saved = new Set(rows.map((r) => r.name));
+  return {
+    dvla: Boolean(active.DVLA_API_KEY),
+    provider: Boolean(active.LOOKUP_URL),
+    mot: Boolean(active.MOT_CLIENT_ID && active.MOT_CLIENT_SECRET && active.MOT_API_KEY),
+    // Whether it came from the app or from the deployment, so nobody wonders
+    // why a key they never typed is in use.
+    dvlaFromSettings: saved.has('DVLA_API_KEY'),
+    providerFromSettings: saved.has('LOOKUP_URL'),
+  };
+}
+
 const emailOf = (body) => str(body.email, 160)?.toLowerCase() || null;
 
 async function emailTaken(env, email, exceptId) {
@@ -249,7 +289,7 @@ export const ROUTES = [
   /* ---- identification and pricing ---- */
 
   ['GET', /^\/lookup$/, async ({ env, user, query }) => {
-    const result = await identify(env, query.get('plate') || '', query.get('vin') || '');
+    const result = await identify(await lookupEnv(env, user), query.get('plate') || '', query.get('vin') || '');
     const existing = result.plateKey
       ? await first(env,
         'SELECT id, plate, make, model, year, status FROM vehicles WHERE dealership_id = ? AND plate_key = ?',
@@ -697,6 +737,66 @@ export const ROUTES = [
     const code = joinCode();
     await run(env, 'UPDATE dealerships SET join_code = ? WHERE id = ?', code, user.dealership_id);
     return { joinCode: code };
+  }],
+
+  /** What is configured, so the settings screen can say so without ever
+   *  learning the key itself. */
+  ['GET', /^\/settings\/lookup$/, async ({ env, user }) => ({ lookup: await lookupStatus(env, user) })],
+
+  /**
+   * Save a lookup key from inside the app. The value goes to the database and
+   * is never read back out to a browser — the screen is told only whether
+   * something is set, which is all it needs to render.
+   */
+  ['PUT', /^\/settings\/lookup$/, async ({ env, user, body }) => {
+    if (user.role !== 'owner') fail(403, 'Only the account owner can change the lookup key');
+
+    const incoming = {
+      DVLA_API_KEY: body.dvlaApiKey,
+      LOOKUP_URL: body.lookupUrl,
+      LOOKUP_KEY: body.lookupKey,
+      LOOKUP_HEADER: body.lookupHeader,
+      LOOKUP_NAME: body.lookupName,
+    };
+
+    const statements = [];
+    for (const [name, raw] of Object.entries(incoming)) {
+      if (raw === undefined) continue;
+      const value = str(raw, 500);
+      if (value === null) {
+        // An emptied box means "stop using this", not "ignore me".
+        statements.push(env.DB.prepare('DELETE FROM settings WHERE dealership_id = ? AND name = ?')
+          .bind(user.dealership_id, name));
+      } else {
+        statements.push(env.DB.prepare(
+          `INSERT INTO settings (dealership_id, name, value, updated_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(dealership_id, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        ).bind(user.dealership_id, name, value, nowIso()));
+      }
+    }
+    if (statements.length) await env.DB.batch(statements);
+    return { lookup: await lookupStatus(env, user) };
+  }],
+
+  /**
+   * Try the saved key against a real registration and report what came back.
+   * Saving a key and not knowing whether it works is the position this whole
+   * feature exists to get out of.
+   */
+  ['POST', /^\/settings\/lookup\/test$/, async ({ env, user, body }) => {
+    const plate = str(body.plate, 12) || 'LT20XYZ';
+    const result = await identify(await lookupEnv(env, user), plate);
+    const live = result.sources.filter((s) => !/^Plate decoder/.test(s));
+    return {
+      plate: result.plate,
+      identified: result.identified,
+      sources: result.sources,
+      // The fields a provider actually returned, so a working key is obvious.
+      fields: ['make', 'model', 'colour', 'fuel', 'year', 'engineCc', 'motExpiry', 'taxStatus']
+        .filter((k) => result.fields[k] !== undefined && result.fields[k] !== null)
+        .map((k) => ({ field: k, value: String(result.fields[k]) })),
+      answered: live.length > 0 && !live.every((s) => /unavailable/i.test(s)),
+    };
   }],
 
   ['PATCH', /^\/settings$/, async ({ env, user, body }) => {

@@ -159,6 +159,21 @@ export const SCHEMA = [
      source     TEXT,
      fetched_at TEXT NOT NULL
    )`,
+
+  // Things a dealership sets for itself that are nobody else's business —
+  // notably their lookup API key. Kept here rather than as columns on
+  // `dealerships` so adding a setting never needs a schema change, which
+  // matters because this app is deployed by people who will not run a
+  // migration. A new key/value row is free; an ALTER TABLE is not.
+  //
+  // Read on the server only. A value in here must never be sent to a browser.
+  `CREATE TABLE IF NOT EXISTS settings (
+     dealership_id TEXT NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+     name          TEXT NOT NULL,
+     value         TEXT,
+     updated_at    TEXT NOT NULL,
+     PRIMARY KEY (dealership_id, name)
+   )`,
 ];
 
 /**

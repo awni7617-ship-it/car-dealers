@@ -1764,20 +1764,32 @@ function renderSettings() {
       </div>
 
       <div class="card">
-        <div class="card-head"><h3>Number plate lookups</h3></div>
+        <div class="card-head"><h3>Number plate lookups</h3><span id="lookup-state" class="badge">checking…</span></div>
         <p style="color:var(--muted);font-size:14px">
-          Forecourt reads every registration offline — format, age identifier, the date window it was issued in and
-          the DVLA office that issued it — and decodes any VIN through the free NHTSA database.
+          Every registration is read offline — format, age identifier, the window it was issued in and the DVLA
+          office that issued it. Add a key below and the make, colour, fuel, engine size, MOT and tax come straight
+          from the plate too.
         </p>
-        <p style="color:var(--muted);font-size:14px;margin-top:10px">${globalThis.FORECOURT_SHARED
-          ? `A shared page cannot call outside services — that sandbox is what makes it safe to hand round — so
-             there is no DVLA lookup here and no key to add. Make and model suggest as you type instead. For live
-             lookup from the registration, run the Cloudflare version, where a key can be held server-side.`
-          : `For live make, colour, fuel, engine size, MOT and tax straight from the plate, add a free DVLA key as a
-             Worker secret named <code style="font-family:var(--mono)">DVLA_API_KEY</code>, or point
-             <code style="font-family:var(--mono)">LOOKUP_URL</code> at any provider you already pay for. Nothing
-             else in the app changes.`}
-        </p>
+        ${globalThis.FORECOURT_SHARED ? `
+          <p style="color:var(--muted);font-size:14px;margin-top:10px">
+            This is the shared build, which cannot call outside services — that sandbox is what makes it safe to
+            pass round. There is nowhere to put a key here. Run the Cloudflare version for live lookups.
+          </p>`
+        : `
+          <div class="stack" style="margin-top:14px">
+            <div class="field">
+              <label for="s-dvla">DVLA API key</label>
+              <input id="s-dvla" type="password" autocomplete="off" spellcheck="false"
+                     placeholder="Paste your key from dvla.gov.uk" ${isOwner ? '' : 'disabled'} />
+              <span class="hint">Free from the DVLA. Stored on the server and never shown again —
+                paste a new one to replace it, or clear the box and save to stop using it.</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${isOwner ? '<button class="btn btn-primary btn-sm" id="s-save-lookup" type="button">Save key</button>' : ''}
+              <button class="btn btn-secondary btn-sm" id="s-test-lookup" type="button">Test it on a real plate</button>
+            </div>
+            <div id="lookup-result"></div>
+          </div>`}
       </div>
     </div>`;
 
@@ -1828,6 +1840,67 @@ function renderSettings() {
         toast('Saved', 'good');
       } catch (err) {
         toast(err.message, 'bad');
+      }
+      e.target.disabled = false;
+    });
+  }
+
+  // The lookup card: say what is configured, let the owner change it, and let
+  // anyone prove it works.
+  if ($('#lookup-state') && !globalThis.FORECOURT_SHARED) {
+    const paint = (lookup) => {
+      const badge = $('#lookup-state');
+      const on = lookup.dvla || lookup.provider;
+      badge.className = `badge ${on ? 'good' : ''}`;
+      badge.textContent = on
+        ? `${lookup.provider ? esc(lookup.providerName || 'provider') : 'DVLA'} key saved`
+        : 'no key — offline decode only';
+    };
+
+    api('/settings/lookup').then((res) => paint(res.lookup)).catch(() => {
+      $('#lookup-state').textContent = '';
+    });
+
+    if ($('#s-save-lookup')) {
+      $('#s-save-lookup').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try {
+          const res = await api('/settings/lookup', {
+            method: 'PUT',
+            body: { dvlaApiKey: $('#s-dvla').value.trim() },
+          });
+          $('#s-dvla').value = '';
+          paint(res.lookup);
+          toast(res.lookup.dvla ? 'Key saved — try it on a plate' : 'Key cleared', 'good');
+        } catch (err) {
+          toast(err.message, 'bad');
+        }
+        e.target.disabled = false;
+      });
+    }
+
+    $('#s-test-lookup').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      const out = $('#lookup-result');
+      out.innerHTML = '<div class="card" style="background:var(--surface-sunk);border:0"><div class="skeleton" style="height:40px"></div></div>';
+      try {
+        const plate = prompt('Which registration should I try?', 'LT20 XYZ');
+        if (!plate) {
+          out.innerHTML = '';
+          e.target.disabled = false;
+          return;
+        }
+        const res = await api('/settings/lookup/test', { method: 'POST', body: { plate } });
+        out.innerHTML = `
+          <div class="card" style="background:var(--surface-sunk);border:0">
+            <div class="t" style="font-weight:700;margin-bottom:6px">${esc(res.plate)} —
+              ${res.answered ? 'the key works' : 'nothing came back from a provider'}</div>
+            ${res.fields.length ? `<div class="s" style="margin-bottom:8px">${res.fields
+              .map((f) => `${esc(f.field)}: <b>${esc(f.value)}</b>`).join(' · ')}</div>` : ''}
+            <div class="hint">${res.sources.map((x) => esc(x)).join(' · ') || 'no sources answered'}</div>
+          </div>`;
+      } catch (err) {
+        out.innerHTML = `<p class="hint" style="color:var(--bad)">${esc(err.message)}</p>`;
       }
       e.target.disabled = false;
     });

@@ -458,5 +458,73 @@ test('a database nobody migrated sets itself up rather than failing', async () =
   const tables = env.DB._sqlite
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all().map((r) => r.name);
-  assert.deepEqual(tables, ['activities', 'appointments', 'dealerships', 'plate_cache', 'sessions', 'users', 'valuations', 'vehicles']);
+  assert.deepEqual(tables, ['activities', 'appointments', 'dealerships', 'plate_cache',
+    'sessions', 'settings', 'users', 'valuations', 'vehicles']);
+});
+
+test('a lookup key can be saved from inside the app, and never comes back out', async () => {
+  const env = testEnv();
+  const { client: c } = await signUp(env);
+
+  const before = await c.get('/settings/lookup');
+  assert.equal(before.data.lookup.dvla, false, 'nothing configured to begin with');
+
+  const saved = await c.api('/settings/lookup', { method: 'PUT', body: { dvlaApiKey: 'secret-key-value' } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.lookup.dvla, true);
+  assert.equal(saved.data.lookup.dvlaFromSettings, true, 'and it knows the key came from the app');
+
+  // The whole point: the server holds it, the browser never sees it again.
+  assert.ok(!JSON.stringify(saved.data).includes('secret-key-value'), 'the key must not be echoed back');
+  const status = await c.get('/settings/lookup');
+  assert.ok(!JSON.stringify(status.data).includes('secret-key-value'), 'nor returned by the status route');
+  assert.ok(!JSON.stringify((await c.get('/me')).data).includes('secret-key-value'));
+
+  // It is stored, though.
+  const row = env.DB._sqlite.prepare("SELECT value FROM settings WHERE name = 'DVLA_API_KEY'").get();
+  assert.equal(row.value, 'secret-key-value');
+
+  // Clearing the box stops it being used.
+  const cleared = await c.api('/settings/lookup', { method: 'PUT', body: { dvlaApiKey: '' } });
+  assert.equal(cleared.data.lookup.dvla, false);
+  assert.equal(env.DB._sqlite.prepare("SELECT COUNT(*) AS n FROM settings WHERE name = 'DVLA_API_KEY'").get().n, 0);
+});
+
+test('only the owner can change the lookup key', async () => {
+  const env = testEnv();
+  const { client: owner, res } = await signUp(env);
+  const mate = client(env);
+  await mate.post('/auth/join', {
+    name: 'Jess Ward', email: 'jess@ridgeway.test', password: 'another-long-password',
+    joinCode: res.data.user.dealership.joinCode,
+  });
+
+  assert.equal((await mate.api('/settings/lookup', { method: 'PUT', body: { dvlaApiKey: 'nope' } })).status, 403);
+  assert.equal((await owner.api('/settings/lookup', { method: 'PUT', body: { dvlaApiKey: 'yes' } })).status, 200);
+  // A member can still see whether one is set, and test it.
+  assert.equal((await mate.get('/settings/lookup')).data.lookup.dvla, true);
+});
+
+test('one dealership cannot use or see another one\'s lookup key', async () => {
+  const env = testEnv();
+  const { client: a } = await signUp(env);
+  await a.api('/settings/lookup', { method: 'PUT', body: { dvlaApiKey: 'first-dealerships-key' } });
+
+  const { client: b } = await signUp(env, {
+    name: 'Alex Poole', dealership: 'Sandpit Cars', email: 'alex@sandpit.test',
+  });
+  const status = await b.get('/settings/lookup');
+  assert.equal(status.data.lookup.dvla, false, 'a key is per dealership, not per deployment');
+  assert.ok(!JSON.stringify(status.data).includes('first-dealerships-key'));
+});
+
+test('the lookup test route reports what answered, with no key configured', async () => {
+  const env = testEnv();
+  const { client: c } = await signUp(env);
+
+  const res = await c.post('/settings/lookup/test', { plate: 'MA68KDR' });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.plate, 'MA68 KDR');
+  assert.equal(res.data.answered, false, 'nothing to answer with when no key is set');
+  assert.ok(res.data.sources.includes('Plate decoder'), 'but the offline decode still runs');
 });

@@ -156,3 +156,11 @@ CREATE TABLE IF NOT EXISTS plate_cache (
   source     TEXT,
   fetched_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  dealership_id TEXT NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  value         TEXT,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (dealership_id, name)
+);
