@@ -15,70 +15,9 @@ import {
   counts, csvCell, daysBetween, decorate, fail, isoDate, joinCode, nowIso, num, str, uid,
   vehiclePatch,
 } from '../lib/model.js';
+import { hashPassword, verifyPassword } from '../lib/password.js';
+import { blank, clearSession, load, readSession, save, writeSession } from './store.js';
 
-const STORE_KEY = 'forecourt-store-v1';
-const SESSION_KEY = 'forecourt-session-v1';
-
-function blank() {
-  return { dealership: null, users: [], vehicles: [], activities: [], appointments: [], valuations: [] };
-}
-
-/**
- * Private browsing, blocked site data or a full quota all make localStorage
- * throw. Rather than dying, fall back to memory for the session and raise a
- * flag so the page can warn that nothing is being kept.
- */
-const memory = new Map();
-let ephemeral = false;
-
-function getItem(key) {
-  if (!ephemeral) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      ephemeral = true;
-      globalThis.FORECOURT_EPHEMERAL = true;
-    }
-  }
-  return memory.has(key) ? memory.get(key) : null;
-}
-
-function setItem(key, value) {
-  if (!ephemeral) {
-    try {
-      localStorage.setItem(key, value);
-      return;
-    } catch {
-      ephemeral = true;
-      globalThis.FORECOURT_EPHEMERAL = true;
-    }
-  }
-  memory.set(key, value);
-}
-
-function removeItem(key) {
-  memory.delete(key);
-  try {
-    localStorage.removeItem(key);
-  } catch { /* nothing to do */ }
-}
-
-function load() {
-  try {
-    const raw = getItem(STORE_KEY);
-    return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
-  } catch {
-    return blank();
-  }
-}
-
-function save(db) {
-  setItem(STORE_KEY, JSON.stringify(db));
-}
-async function hash(text) {
-  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`forecourt:${text}`));
-  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
 function publicUser(db, user) {
   const d = db.dealership;
   return {
@@ -99,7 +38,7 @@ function publicUser(db, user) {
 }
 
 function currentUser(db) {
-  const id = getItem(SESSION_KEY);
+  const id = readSession();
   return id ? db.users.find((u) => u.id === id) || null : null;
 }
 
@@ -143,11 +82,11 @@ const LOCAL_ROUTES = [
     };
     const user = {
       id: uid(), name, email, role: 'owner',
-      password: await hash(body.password), created_at: nowIso(), last_seen_at: nowIso(),
+      password: await hashPassword(body.password), created_at: nowIso(), last_seen_at: nowIso(),
     };
     db.users.push(user);
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
@@ -160,11 +99,11 @@ const LOCAL_ROUTES = [
     if (String(body.password || '').length < 8) fail(400, 'Use a password of at least 8 characters');
     const user = {
       id: uid(), name: str(body.name, 80), email, role: 'member',
-      password: await hash(body.password), created_at: nowIso(), last_seen_at: nowIso(),
+      password: await hashPassword(body.password), created_at: nowIso(), last_seen_at: nowIso(),
     };
     db.users.push(user);
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
@@ -172,15 +111,15 @@ const LOCAL_ROUTES = [
     const email = str(body.email, 160)?.toLowerCase();
     if (!email || !body.password) fail(400, 'Enter your email and password');
     const user = db.users.find((u) => u.email === email);
-    if (!user || user.password !== await hash(body.password || '')) fail(401, 'Email or password is wrong');
+    if (!user || !(await verifyPassword(body.password || '', user.password))) fail(401, 'Email or password is wrong');
     user.last_seen_at = nowIso();
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
   ['POST', /^\/auth\/logout$/, async () => {
-    removeItem(SESSION_KEY);
+    clearSession();
     return { ok: true };
   }],
 
@@ -199,8 +138,8 @@ const LOCAL_ROUTES = [
 
   ['POST', /^\/me\/password$/, async (db, _p, body, user) => {
     if (String(body.newPassword || '').length < 8) fail(400, 'Use a password of at least 8 characters');
-    if (user.password !== await hash(body.currentPassword || '')) fail(401, 'Current password is wrong');
-    user.password = await hash(body.newPassword);
+    if (!(await verifyPassword(body.currentPassword || '', user.password))) fail(401, 'Current password is wrong');
+    user.password = await hashPassword(body.newPassword);
     save(db);
     return { ok: true };
   }],

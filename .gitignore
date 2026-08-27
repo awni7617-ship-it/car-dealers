@@ -6,3 +6,4 @@ dist/
 *.log
 .DS_Store
 dist-static/
+dist-shared/

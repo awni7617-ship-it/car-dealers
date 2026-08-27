@@ -15,7 +15,8 @@
     "deploy:cf": "CI=true wrangler d1 migrations apply forecourt --remote && CI=true wrangler deploy",
     "standalone:site": "node scripts/build-standalone.mjs && mkdir -p dist-static && cp forecourt.html dist-static/index.html",
     "check:lookup": "node scripts/check-lookup.mjs",
-    "build:migration": "node scripts/build-migration.mjs"
+    "build:migration": "node scripts/build-migration.mjs",
+    "artifact": "node scripts/build-artifact.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.42.0"

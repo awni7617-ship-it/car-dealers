@@ -1395,6 +1395,52 @@ function csvCell(value) {
 }
 
 
+/* ---- passwords ---- */
+
+/**
+ * Password hashing, shared by every build.
+ *
+ * PBKDF2-SHA256 with a per-user salt, through WebCrypto — the same code runs on
+ * the Worker and in the browser. It matters most in the shared build, where the
+ * stored hash sits in a document anyone with the link can read: a fast digest
+ * there would be a list of passwords waiting to be cracked.
+ */
+
+const ITERATIONS = 210000;
+
+const bytesToHex = (bytes) => [...new Uint8Array(bytes)]
+  .map((b) => b.toString(16).padStart(2, '0')).join('');
+
+const hexToBytes = (hex) => new Uint8Array((hex.match(/.{1,2}/g) || []).map((b) => parseInt(b, 16)));
+
+async function derive(password, salt, iterations = ITERATIONS) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
+  return new Uint8Array(bits);
+}
+
+async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await derive(password, salt);
+  return `pbkdf2$${ITERATIONS}$${bytesToHex(salt)}$${bytesToHex(hash)}`;
+}
+
+/**
+ * Compared byte by byte in constant time: a fast reject on the first wrong
+ * character would leak the hash one character at a time.
+ */
+async function verifyPassword(password, stored) {
+  const [scheme, iterations, salt, hash] = String(stored || '').split('$');
+  if (scheme !== 'pbkdf2' || !salt || !hash) return false;
+  const candidate = await derive(String(password || ''), hexToBytes(salt), Number(iterations) || ITERATIONS);
+  const expected = hexToBytes(hash);
+  if (candidate.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < candidate.length; i++) diff |= candidate[i] ^ expected[i];
+  return diff === 0;
+}
+
+
 /* ---- sample stock ---- */
 
 /**
@@ -1503,16 +1549,15 @@ function buildDemo(user) {
 }
 
 
-/* ---- local backend ---- */
+/* ---- storage ---- */
 
 /**
- * Local backend for the standalone build.
+ * Where the standalone build keeps its data: this browser, and nowhere else.
  *
- * Answers exactly the same routes as the Worker, with the same JSON shapes, but
- * against localStorage instead of D1 — so the front end is byte-for-byte the
- * same code in both builds. Everything stays on the device that opened the page.
- *
- * Loaded only by `npm run standalone`; the deployed app never sees it.
+ * The backend above this only ever calls load/save and the three session
+ * helpers, so swapping this file for another store changes where the data
+ * lives without touching a line of the routes — which is how the shared build
+ * keeps the same app on a different foundation.
  */
 
 const STORE_KEY = 'forecourt-store-v1';
@@ -1574,10 +1619,24 @@ function load() {
 function save(db) {
   setItem(STORE_KEY, JSON.stringify(db));
 }
-async function hash(text) {
-  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`forecourt:${text}`));
-  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+
+const readSession = () => getItem(SESSION_KEY);
+const writeSession = (id) => setItem(SESSION_KEY, id);
+const clearSession = () => removeItem(SESSION_KEY);
+
+
+/* ---- local backend ---- */
+
+/**
+ * Local backend for the standalone build.
+ *
+ * Answers exactly the same routes as the Worker, with the same JSON shapes, but
+ * against localStorage instead of D1 — so the front end is byte-for-byte the
+ * same code in both builds. Everything stays on the device that opened the page.
+ *
+ * Loaded only by `npm run standalone`; the deployed app never sees it.
+ */
+
 function publicUser(db, user) {
   const d = db.dealership;
   return {
@@ -1598,7 +1657,7 @@ function publicUser(db, user) {
 }
 
 function currentUser(db) {
-  const id = getItem(SESSION_KEY);
+  const id = readSession();
   return id ? db.users.find((u) => u.id === id) || null : null;
 }
 
@@ -1642,11 +1701,11 @@ const LOCAL_ROUTES = [
     };
     const user = {
       id: uid(), name, email, role: 'owner',
-      password: await hash(body.password), created_at: nowIso(), last_seen_at: nowIso(),
+      password: await hashPassword(body.password), created_at: nowIso(), last_seen_at: nowIso(),
     };
     db.users.push(user);
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
@@ -1659,11 +1718,11 @@ const LOCAL_ROUTES = [
     if (String(body.password || '').length < 8) fail(400, 'Use a password of at least 8 characters');
     const user = {
       id: uid(), name: str(body.name, 80), email, role: 'member',
-      password: await hash(body.password), created_at: nowIso(), last_seen_at: nowIso(),
+      password: await hashPassword(body.password), created_at: nowIso(), last_seen_at: nowIso(),
     };
     db.users.push(user);
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
@@ -1671,15 +1730,15 @@ const LOCAL_ROUTES = [
     const email = str(body.email, 160)?.toLowerCase();
     if (!email || !body.password) fail(400, 'Enter your email and password');
     const user = db.users.find((u) => u.email === email);
-    if (!user || user.password !== await hash(body.password || '')) fail(401, 'Email or password is wrong');
+    if (!user || !(await verifyPassword(body.password || '', user.password))) fail(401, 'Email or password is wrong');
     user.last_seen_at = nowIso();
     save(db);
-    setItem(SESSION_KEY, user.id);
+    writeSession(user.id);
     return { user: publicUser(db, user) };
   }],
 
   ['POST', /^\/auth\/logout$/, async () => {
-    removeItem(SESSION_KEY);
+    clearSession();
     return { ok: true };
   }],
 
@@ -1698,8 +1757,8 @@ const LOCAL_ROUTES = [
 
   ['POST', /^\/me\/password$/, async (db, _p, body, user) => {
     if (String(body.newPassword || '').length < 8) fail(400, 'Use a password of at least 8 characters');
-    if (user.password !== await hash(body.currentPassword || '')) fail(401, 'Current password is wrong');
-    user.password = await hash(body.newPassword);
+    if (!(await verifyPassword(body.currentPassword || '', user.password))) fail(401, 'Current password is wrong');
+    user.password = await hashPassword(body.newPassword);
     save(db);
     return { ok: true };
   }],
