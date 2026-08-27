@@ -24,8 +24,15 @@ const plain = (row) => (row ? { ...row } : row);
 
 export function createTestD1() {
   const sqlite = new DatabaseSync(':memory:');
-  for (const file of readdirSync(join(root, 'migrations')).sort()) {
-    if (file.endsWith('.sql')) sqlite.exec(readFileSync(join(root, 'migrations', file), 'utf8'));
+  // FORECOURT_SCHEMA runs the suite against a schema dumped from a real D1
+  // database instead of the migrations — the way to prove that what is
+  // actually deployed still satisfies the app, not just what should be.
+  if (process.env.FORECOURT_SCHEMA) {
+    sqlite.exec(readFileSync(process.env.FORECOURT_SCHEMA, 'utf8'));
+  } else {
+    for (const file of readdirSync(join(root, 'migrations')).sort()) {
+      if (file.endsWith('.sql')) sqlite.exec(readFileSync(join(root, 'migrations', file), 'utf8'));
+    }
   }
 
   const statement = (sql, params) => ({
