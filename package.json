@@ -13,7 +13,8 @@
     "test": "node --test \"tests/**/*.test.js\"",
     "check": "node scripts/check.mjs",
     "deploy:cf": "CI=true wrangler d1 migrations apply forecourt --remote && CI=true wrangler deploy",
-    "standalone:site": "node scripts/build-standalone.mjs && mkdir -p dist-static && cp forecourt.html dist-static/index.html"
+    "standalone:site": "node scripts/build-standalone.mjs && mkdir -p dist-static && cp forecourt.html dist-static/index.html",
+    "check:lookup": "node scripts/check-lookup.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.42.0"

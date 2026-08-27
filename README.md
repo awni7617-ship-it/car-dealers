@@ -108,6 +108,43 @@ npx wrangler secret put MOT_CLIENT_SECRET
 npx wrangler secret put MOT_API_KEY
 ```
 
+Each prompts for the value and stores it encrypted against the Worker. The key
+never touches the repository, the config, or your shell history — so never put
+one in `wrangler.jsonc`, and never commit one. Secrets survive redeploys, and
+can also be set in the dashboard under **Workers → the Worker → Settings →
+Variables and Secrets**, as type *Secret*.
+
+### Checking a key before you deploy
+
+```sh
+read -rs DVLA_API_KEY && export DVLA_API_KEY   # typed, not echoed, not in history
+npm run check:lookup -- LT20XYZ
+```
+
+This runs the same `identify()` the Worker runs and prints what came back and
+which provider said it. A rejected key shows up as `DVLA responded 403` rather
+than as an empty form after a deploy.
+
+### A provider other than DVLA
+
+`LOOKUP_URL` points the same code at anything that answers with JSON — put
+`{plate}` where the registration goes:
+
+| Secret | Meaning |
+| --- | --- |
+| `LOOKUP_URL` | e.g. `https://api.example.com/vehicle?reg={plate}` |
+| `LOOKUP_KEY` | your key, sent as a header |
+| `LOOKUP_HEADER` | the header name, if it is not `x-api-key` |
+| `LOOKUP_NAME` | what to call it on screen, e.g. `UK Vehicle Data` |
+
+The response is read loosely — `make`/`Make`/`manufacturer`, `engineCc`/
+`engineCapacity`/`engineSize` and so on all land in the right field, whether the
+payload is at the top level or nested under `vehicle`, `data`, `result` or
+`Response`.
+
+**`LOOKUP_URL` wins over `DVLA_API_KEY`.** If both are set, DVLA is not called
+at all — `check:lookup` warns you about this.
+
 DVLA gives colour, fuel, engine size, tax and MOT status. The MOT history gives
 what DVLA does not: the model, and every odometer reading ever recorded — so the
 app can flag a mileage that goes backwards. A VIN is decoded through the free
