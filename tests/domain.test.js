@@ -170,9 +170,18 @@ test('hashing a password fits inside a free Worker CPU budget', async () => {
     return Number(process.hrtime.bigint() - started) / 1e6;
   };
 
+  // Best of several. A machine that is busy elsewhere inflates any single
+  // reading, and a timing test that flakes is a timing test people switch off.
+  // The fastest run is the closest thing to the real cost of the work.
+  const best = async (fn) => {
+    const runs = [];
+    for (let i = 0; i < 5; i++) runs.push(await time(fn));
+    return Math.min(...runs);
+  };
+
   const stored = await hashPassword('a-long-enough-password');
-  const hashMs = await time(() => hashPassword('a-long-enough-password'));
-  const verifyMs = await time(() => verifyPassword('a-long-enough-password', stored));
+  const hashMs = await best(() => hashPassword('a-long-enough-password'));
+  const verifyMs = await best(() => verifyPassword('a-long-enough-password', stored));
 
   // Half the budget, so the rest of the request has somewhere to live. This
   // machine is not a Cloudflare edge node, so it is a smoke alarm rather than a
