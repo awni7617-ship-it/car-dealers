@@ -127,7 +127,13 @@ const header = `// Forecourt — the whole app in one file.
 `;
 
 await writeFile(join(out, 'worker.js'), header + bundled);
-await rm(join(out, 'entry.js'), { force: true });
+
+// Leave exactly one file in the folder. Wrangler also drops a sourcemap and a
+// README of its own here, and "which of these three do I paste?" is the
+// question this whole build exists to stop anyone having to ask.
+for (const junk of ['entry.js', 'entry.js.map', 'worker.js.map', 'README.md']) {
+  await rm(join(out, junk), { force: true });
+}
 await rm(build, { recursive: true, force: true });
 
 const size = (header.length + bundled.length) / 1024;
